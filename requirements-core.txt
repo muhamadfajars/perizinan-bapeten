@@ -1,0 +1,10 @@
+pandas
+numpy
+pdfplumber
+pypdfium2
+Pillow
+rapidfuzz
+opencv-python-headless
+matplotlib
+streamlit
+pytest

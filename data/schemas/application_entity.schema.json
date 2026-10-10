@@ -1,0 +1,518 @@
+{
+  "$defs": {
+    "AdministrativeDocument": {
+      "description": "Catatan dokumen kelengkapan administrasi yang terdaftar di formulir.",
+      "properties": {
+        "requirement": {
+          "description": "Nama persyaratan / dokumen",
+          "title": "Requirement",
+          "type": "string"
+        },
+        "document_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nomor dokumen",
+          "title": "Document Number"
+        },
+        "document_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tanggal dokumen",
+          "title": "Document Date"
+        }
+      },
+      "required": [
+        "requirement"
+      ],
+      "title": "AdministrativeDocument",
+      "type": "object"
+    },
+    "EvidenceSource": {
+      "description": "Tracks the exact origin of an extracted field value.",
+      "properties": {
+        "document_type": {
+          "description": "Document type key, e.g., formulir, ppkr, label_unit, sip, sib",
+          "title": "Document Type",
+          "type": "string"
+        },
+        "file_name": {
+          "description": "Original file name",
+          "title": "File Name",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "1-indexed page number in PDF, or 1 for image",
+          "title": "Page"
+        },
+        "raw_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Raw text snippet containing the value",
+          "title": "Raw Text"
+        },
+        "confidence": {
+          "default": 1.0,
+          "description": "Confidence score (0.0 to 1.0)",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional bounding box [x1, y1, x2, y2]",
+          "title": "Bbox"
+        },
+        "extraction_method": {
+          "default": "unknown",
+          "description": "Method used: table_cell, regex, ocr, manual",
+          "title": "Extraction Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_type",
+        "file_name"
+      ],
+      "title": "EvidenceSource",
+      "type": "object"
+    },
+    "ExtractedField_str_": {
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cleaned/parsed value",
+          "title": "Value"
+        },
+        "raw_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Raw string value before normalization",
+          "title": "Raw Value"
+        },
+        "normalized_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical normalized string for matching",
+          "title": "Normalized Value"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Evidence source where value was found"
+        }
+      },
+      "title": "ExtractedField[str]",
+      "type": "object"
+    },
+    "FacilityEntity": {
+      "description": "Fasilitas / Rumah Sakit / Proyek.",
+      "properties": {
+        "id": {
+          "default": "facility_1",
+          "description": "Unique entity ID",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_name": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Nama proyek / fasilitas"
+        },
+        "project_address": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Alamat proyek / fasilitas"
+        },
+        "institution_name": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractedField_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nama instansi pemohon"
+        },
+        "institution_address": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractedField_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Alamat instansi pemohon"
+        }
+      },
+      "title": "FacilityEntity",
+      "type": "object"
+    },
+    "PPREntity": {
+      "description": "Petugas Proteksi Radiasi (PPR).",
+      "properties": {
+        "id": {
+          "description": "Unique PPR entity ID, e.g. ppr_1",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Nama PPR"
+        },
+        "sib_number": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractedField_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nomor Surat Izin Bekerja (SIB)"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractedField_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Masa berlaku SIB"
+        },
+        "appointment_letter_number": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractedField_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nomor Surat Perintah / SK Penunjukan PPR (Sprint)"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "PPREntity",
+      "type": "object"
+    },
+    "PersonnelEntity": {
+      "description": "Personel / Petugas Medis / Radiografer / Dokter Spesialis.",
+      "properties": {
+        "id": {
+          "description": "Unique person entity ID, e.g. person_1",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Nama personel"
+        },
+        "profession": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Profesi / keahlian (Dokter Spesialis Radiologi, Radiografer, dll)"
+        },
+        "npr": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractedField_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nomor Pekerja Radiasi (NPR / NRP)"
+        },
+        "sip_number": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractedField_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nomor SIP (Surat Izin Praktik)"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractedField_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Masa berlaku SIP"
+        },
+        "practice_location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractedField_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tempat praktik tercantum pada SIP"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "PersonnelEntity",
+      "type": "object"
+    },
+    "XRayEquipmentEntity": {
+      "description": "Unit Pesawat Sinar-X.",
+      "properties": {
+        "id": {
+          "description": "Unique equipment unit entity ID, e.g. unit_1",
+          "title": "Id",
+          "type": "string"
+        },
+        "unit_brand": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Merk unit pesawat sinar-X"
+        },
+        "unit_type": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Tipe pesawat sinar-X"
+        },
+        "unit_serial_number": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Nomor seri unit pesawat sinar-X"
+        },
+        "max_condition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractedField_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Kondisi maksimum operasional (kV / mA)"
+        },
+        "tube": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/XRayTubeEntity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tabung sinar-X terpasang pada unit ini"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "XRayEquipmentEntity",
+      "type": "object"
+    },
+    "XRayTubeEntity": {
+      "description": "Tabung Sinar-X (X-Ray Tube).",
+      "properties": {
+        "id": {
+          "description": "Unique tube entity ID, e.g. tube_1",
+          "title": "Id",
+          "type": "string"
+        },
+        "tube_brand": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Merk tabung sinar-X (e.g. TOSHIBA, CANON, VARIAN)"
+        },
+        "tube_type": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Tipe tabung sinar-X"
+        },
+        "tube_model": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Model tabung (unit model / insert model / housing model)"
+        },
+        "tube_serial_number": {
+          "$ref": "#/$defs/ExtractedField_str_",
+          "description": "Nomor seri tabung sinar-X"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "XRayTubeEntity",
+      "type": "object"
+    }
+  },
+  "description": "Entitas Permohonan Lengkap (Container Hasil Ekstraksi Seluruh Dokumen).",
+  "properties": {
+    "application_id": {
+      "default": "",
+      "description": "ID permohonan atau nomor registrasi",
+      "title": "Application Id",
+      "type": "string"
+    },
+    "registration_number": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Nomor registrasi BAPETEN",
+      "title": "Registration Number"
+    },
+    "registration_date": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Tanggal registrasi",
+      "title": "Registration Date"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Lingkup kegiatan",
+      "title": "Scope"
+    },
+    "facility": {
+      "$ref": "#/$defs/FacilityEntity",
+      "description": "Data fasilitas"
+    },
+    "personnel": {
+      "description": "Daftar personel",
+      "items": {
+        "$ref": "#/$defs/PersonnelEntity"
+      },
+      "title": "Personnel",
+      "type": "array"
+    },
+    "ppr": {
+      "description": "Daftar PPR",
+      "items": {
+        "$ref": "#/$defs/PPREntity"
+      },
+      "title": "Ppr",
+      "type": "array"
+    },
+    "xray_equipment": {
+      "description": "Daftar pesawat sinar-X",
+      "items": {
+        "$ref": "#/$defs/XRayEquipmentEntity"
+      },
+      "title": "Xray Equipment",
+      "type": "array"
+    },
+    "administrative_documents": {
+      "description": "Daftar dokumen kelengkapan administrasi",
+      "items": {
+        "$ref": "#/$defs/AdministrativeDocument"
+      },
+      "title": "Administrative Documents",
+      "type": "array"
+    }
+  },
+  "title": "ApplicationEntity",
+  "type": "object"
+}

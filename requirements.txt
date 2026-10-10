@@ -1,0 +1,17 @@
+pandas
+numpy
+pdfplumber
+pypdfium2
+Pillow
+rapidfuzz
+opencv-python-headless
+matplotlib
+streamlit
+pytest
+ipykernel
+ipywidgets
+paddleocr
+paddlepaddle
+pydantic>=2.9.0
+fastapi
+uvicorn

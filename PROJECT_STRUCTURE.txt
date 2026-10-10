@@ -1,0 +1,32 @@
+bapeten_document_matching_system/
+├── main.py                         # entry point CLI
+├── config.py                       # konfigurasi/path/threshold
+├── requirements.txt
+├── README.md
+├── .gitignore
+├── src/
+│   ├── pipeline.py                 # orkestrasi backend
+│   ├── ocr/
+│   │   ├── engine.py               # PaddleOCR
+│   │   └── preprocess.py           # OpenCV preprocessing
+│   ├── extraction/
+│   │   └── pdf_extractor.py        # Formulir + PPKR extraction
+│   ├── matching/
+│   │   └── label_matcher.py        # label parsing + fuzzy matching
+│   ├── validation/
+│   │   └── institution.py          # institusi + personil matching
+│   └── utils/
+│       └── text.py
+├── data/
+│   ├── input/
+│   │   ├── formulir/
+│   │   ├── label/
+│   │   └── ppkr/
+│   └── output/
+│       ├── preprocessed/
+│       ├── ocr/
+│       └── matching/
+├── notebooks/
+│   └── matching_formulir_vs_label_bapeten_colab.ipynb
+├── tests/
+└── logs/

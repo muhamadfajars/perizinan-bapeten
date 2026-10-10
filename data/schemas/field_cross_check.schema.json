@@ -1,0 +1,161 @@
+{
+  "$defs": {
+    "MatchingStatus": {
+      "description": "Standar status evaluasi cross-check.",
+      "enum": [
+        "SESUAI",
+        "PERLU REVIEW",
+        "TIDAK SESUAI",
+        "TIDAK DITEMUKAN",
+        "WARNING"
+      ],
+      "title": "MatchingStatus",
+      "type": "string"
+    },
+    "SourceEvidence": {
+      "description": "Informasi dokumen sumber untuk suatu nilai field.",
+      "properties": {
+        "document_type": {
+          "description": "Tipe dokumen (e.g. formulir, ppkr, label_unit, sip, sib)",
+          "title": "Document Type",
+          "type": "string"
+        },
+        "document_name": {
+          "description": "Nama file dokumen",
+          "title": "Document Name",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Halaman ditemukannya nilai (1-indexed)",
+          "title": "Page"
+        },
+        "value": {
+          "description": "Nilai yang diekstraksi dari dokumen ini",
+          "title": "Value",
+          "type": "string"
+        },
+        "raw_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Potongan teks / konteks mentah (evidence snippet)",
+          "title": "Raw Text"
+        },
+        "confidence": {
+          "default": 1.0,
+          "description": "Tingkat kepercayaan ekstraksi/OCR",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Bounding box koordinat jika berbasis gambar/OCR",
+          "title": "Bbox"
+        }
+      },
+      "required": [
+        "document_type",
+        "document_name",
+        "value"
+      ],
+      "title": "SourceEvidence",
+      "type": "object"
+    }
+  },
+  "description": "Hasil cross-check untuk satu field tertentu antar beberapa dokumen.",
+  "properties": {
+    "field_key": {
+      "description": "Identifikasi field, misal unit_serial_number",
+      "title": "Field Key",
+      "type": "string"
+    },
+    "field_label": {
+      "description": "Label manusia, misal Nomor Seri Unit",
+      "title": "Field Label",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/MatchingStatus",
+      "description": "Status kesesuaian"
+    },
+    "score": {
+      "anyOf": [
+        {
+          "maximum": 100.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Skor kemiripan / similarity (0-100)",
+      "title": "Score"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Penjelasan mengapa status ini diberikan",
+      "title": "Reason"
+    },
+    "sources": {
+      "description": "Daftar nilai dari dokumen-dokumen pembanding",
+      "items": {
+        "$ref": "#/$defs/SourceEvidence"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "discrepancies": {
+      "description": "Detail perbedaan jika ada ketidaksesuaian",
+      "items": {
+        "type": "string"
+      },
+      "title": "Discrepancies",
+      "type": "array"
+    }
+  },
+  "required": [
+    "field_key",
+    "field_label",
+    "status"
+  ],
+  "title": "FieldCrossCheck",
+  "type": "object"
+}

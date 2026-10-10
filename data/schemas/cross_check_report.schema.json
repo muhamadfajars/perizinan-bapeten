@@ -1,0 +1,339 @@
+{
+  "$defs": {
+    "EntityCrossCheck": {
+      "description": "Hasil cross-check untuk satu entitas (Fasilitas, 1 Personel, 1 PPR, atau 1 Pesawat Sinar-X).",
+      "properties": {
+        "category": {
+          "description": "Kategori entitas: facility | personnel | ppr | xray_equipment | tube",
+          "title": "Category",
+          "type": "string"
+        },
+        "entity_id": {
+          "description": "ID entitas, misal unit_1, person_1",
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "entity_label": {
+          "description": "Label ringkas entitas, misal 'Unit #1: SHIMADZU SB2002000027WK'",
+          "title": "Entity Label",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/MatchingStatus",
+          "description": "Status kumulatif entitas"
+        },
+        "fields": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FieldCrossCheck"
+          },
+          "description": "Pemeriksaan field-field pada entitas ini",
+          "title": "Fields",
+          "type": "object"
+        },
+        "sub_entities": {
+          "description": "Sub-entitas terkait, misal Tabung Sinar-X di dalam Pesawat Sinar-X",
+          "items": {
+            "$ref": "#/$defs/EntityCrossCheck"
+          },
+          "title": "Sub Entities",
+          "type": "array"
+        }
+      },
+      "required": [
+        "category",
+        "entity_id",
+        "entity_label",
+        "status"
+      ],
+      "title": "EntityCrossCheck",
+      "type": "object"
+    },
+    "FieldCrossCheck": {
+      "description": "Hasil cross-check untuk satu field tertentu antar beberapa dokumen.",
+      "properties": {
+        "field_key": {
+          "description": "Identifikasi field, misal unit_serial_number",
+          "title": "Field Key",
+          "type": "string"
+        },
+        "field_label": {
+          "description": "Label manusia, misal Nomor Seri Unit",
+          "title": "Field Label",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/MatchingStatus",
+          "description": "Status kesesuaian"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "maximum": 100.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Skor kemiripan / similarity (0-100)",
+          "title": "Score"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Penjelasan mengapa status ini diberikan",
+          "title": "Reason"
+        },
+        "sources": {
+          "description": "Daftar nilai dari dokumen-dokumen pembanding",
+          "items": {
+            "$ref": "#/$defs/SourceEvidence"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "discrepancies": {
+          "description": "Detail perbedaan jika ada ketidaksesuaian",
+          "items": {
+            "type": "string"
+          },
+          "title": "Discrepancies",
+          "type": "array"
+        }
+      },
+      "required": [
+        "field_key",
+        "field_label",
+        "status"
+      ],
+      "title": "FieldCrossCheck",
+      "type": "object"
+    },
+    "MatchSummary": {
+      "description": "Ringkasan statistik hasil cross-check.",
+      "properties": {
+        "total_fields_checked": {
+          "default": 0,
+          "description": "Total field yang dievaluasi",
+          "title": "Total Fields Checked",
+          "type": "integer"
+        },
+        "sesuai": {
+          "default": 0,
+          "description": "Jumlah field dengan status SESUAI",
+          "title": "Sesuai",
+          "type": "integer"
+        },
+        "perlu_review": {
+          "default": 0,
+          "description": "Jumlah field dengan status PERLU REVIEW",
+          "title": "Perlu Review",
+          "type": "integer"
+        },
+        "tidak_sesuai": {
+          "default": 0,
+          "description": "Jumlah field dengan status TIDAK SESUAI",
+          "title": "Tidak Sesuai",
+          "type": "integer"
+        },
+        "tidak_ditemukan": {
+          "default": 0,
+          "description": "Jumlah field dengan status TIDAK DITEMUKAN",
+          "title": "Tidak Ditemukan",
+          "type": "integer"
+        },
+        "warning": {
+          "default": 0,
+          "description": "Jumlah field dengan status WARNING",
+          "title": "Warning",
+          "type": "integer"
+        }
+      },
+      "title": "MatchSummary",
+      "type": "object"
+    },
+    "MatchingStatus": {
+      "description": "Standar status evaluasi cross-check.",
+      "enum": [
+        "SESUAI",
+        "PERLU REVIEW",
+        "TIDAK SESUAI",
+        "TIDAK DITEMUKAN",
+        "WARNING"
+      ],
+      "title": "MatchingStatus",
+      "type": "string"
+    },
+    "SourceEvidence": {
+      "description": "Informasi dokumen sumber untuk suatu nilai field.",
+      "properties": {
+        "document_type": {
+          "description": "Tipe dokumen (e.g. formulir, ppkr, label_unit, sip, sib)",
+          "title": "Document Type",
+          "type": "string"
+        },
+        "document_name": {
+          "description": "Nama file dokumen",
+          "title": "Document Name",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Halaman ditemukannya nilai (1-indexed)",
+          "title": "Page"
+        },
+        "value": {
+          "description": "Nilai yang diekstraksi dari dokumen ini",
+          "title": "Value",
+          "type": "string"
+        },
+        "raw_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Potongan teks / konteks mentah (evidence snippet)",
+          "title": "Raw Text"
+        },
+        "confidence": {
+          "default": 1.0,
+          "description": "Tingkat kepercayaan ekstraksi/OCR",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Bounding box koordinat jika berbasis gambar/OCR",
+          "title": "Bbox"
+        }
+      },
+      "required": [
+        "document_type",
+        "document_name",
+        "value"
+      ],
+      "title": "SourceEvidence",
+      "type": "object"
+    }
+  },
+  "description": "Laporan Evaluasi & Cross-Check Lengkap Permohonan BAPETEN.\n\nIni adalah struktur data final yang dihasilkan oleh Python processing engine\ndan dikirimkan ke Laravel Web Application untuk ditampilkan kepada evaluator.",
+  "properties": {
+    "run_id": {
+      "description": "Unique run/job execution ID",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "application_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "ID permohonan atau nomor registrasi BAPETEN",
+      "title": "Application Id"
+    },
+    "created_at": {
+      "description": "Waktu pembuatan laporan ISO 8601",
+      "title": "Created At",
+      "type": "string"
+    },
+    "facility": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EntityCrossCheck"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "1. Identitas Fasilitas (Nama proyek, Alamat proyek)"
+    },
+    "personnel": {
+      "description": "2. Personel (Nama, Profesi/Keahlian, Nama PPR, Masa berlaku, Tempat praktik)",
+      "items": {
+        "$ref": "#/$defs/EntityCrossCheck"
+      },
+      "title": "Personnel",
+      "type": "array"
+    },
+    "ppr": {
+      "description": "Daftar Petugas Proteksi Radiasi (PPR)",
+      "items": {
+        "$ref": "#/$defs/EntityCrossCheck"
+      },
+      "title": "Ppr",
+      "type": "array"
+    },
+    "xray_equipment": {
+      "description": "3. Pesawat Sinar-X (Merk unit, Tipe unit, Nomor seri unit)",
+      "items": {
+        "$ref": "#/$defs/EntityCrossCheck"
+      },
+      "title": "Xray Equipment",
+      "type": "array"
+    },
+    "xray_tubes": {
+      "description": "4. Tabung Sinar-X (Merk tabung, Tipe/model tabung, Nomor seri tabung)",
+      "items": {
+        "$ref": "#/$defs/EntityCrossCheck"
+      },
+      "title": "Xray Tubes",
+      "type": "array"
+    },
+    "summary": {
+      "$ref": "#/$defs/MatchSummary",
+      "description": "Ringkasan statistik status"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "description": "Metadata proses, seperti daftar file diproses, versi pipeline, durasi",
+      "title": "Metadata",
+      "type": "object"
+    }
+  },
+  "required": [
+    "run_id"
+  ],
+  "title": "CrossCheckReport",
+  "type": "object"
+}
