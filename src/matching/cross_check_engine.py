@@ -58,7 +58,7 @@ def compare_two_values(left: str, right: str, mode: str = "fuzzy_text") -> Tuple
     l_str = str(left or "").strip()
     r_str = str(right or "").strip()
 
-    if not l_str or not r_str:
+    if not l_str or not r_str or l_str in ("-", "—") or r_str in ("-", "—"):
         return None, MatchingStatus.TIDAK_DITEMUKAN, "Salah satu nilai kosong"
 
     if mode == "serial":
@@ -99,6 +99,9 @@ def compare_two_values(left: str, right: str, mode: str = "fuzzy_text") -> Tuple
         if l_fac == r_fac:
             return 100.0, MatchingStatus.SESUAI, "Nama fasilitas sesuai"
         score = max(fuzz.token_sort_ratio(l_fac, r_fac), fuzz.token_set_ratio(l_fac, r_fac))
+        # High tolerance for regional / detachment variations or core facility name match
+        if fuzz.token_set_ratio(l_fac, r_fac) >= 80.0:
+            return 100.0, MatchingStatus.SESUAI, f"Nama fasilitas sesuai ({score:.1f}%)"
         if score >= MATCH_THRESHOLD:
             return score, MatchingStatus.SESUAI, f"Nama fasilitas sesuai ({score:.1f}%)"
         if score >= REVIEW_THRESHOLD:
@@ -110,12 +113,14 @@ def compare_two_values(left: str, right: str, mode: str = "fuzzy_text") -> Tuple
         r_addr = normalize_address(r_str)
         if l_addr == r_addr:
             return 100.0, MatchingStatus.SESUAI, "Alamat sesuai sempurna"
+
         score = max(
             fuzz.token_sort_ratio(l_addr, r_addr),
             fuzz.partial_ratio(l_addr, r_addr),
             fuzz.token_set_ratio(l_addr, r_addr),
         )
-        # 1. Below review threshold is completely different
+
+        # 1. Below review threshold is completely different street/city
         if score < REVIEW_THRESHOLD:
             return score, MatchingStatus.TIDAK_SESUAI, f"Alamat tidak sesuai: '{l_str}' vs '{r_str}'"
 
@@ -125,8 +130,11 @@ def compare_two_values(left: str, right: str, mode: str = "fuzzy_text") -> Tuple
         if num_l and num_r and num_l != num_r:
             return score, MatchingStatus.PERLU_REVIEW, f"Nomor alamat berbeda: No. {num_l} vs No. {num_r}"
 
-        # 3. Meets address match threshold with tolerance
-        if score >= ADDRESS_MATCH_THRESHOLD:
+        # 3. High tolerance for address hierarchy variations (e.g. short street address vs full administrative breakdown)
+        if max(fuzz.token_set_ratio(l_addr, r_addr), fuzz.partial_ratio(l_addr, r_addr)) >= 75.0:
+            return 100.0, MatchingStatus.SESUAI, f"Alamat sesuai ({score:.1f}%)"
+
+        if score >= 75.0 or score >= ADDRESS_MATCH_THRESHOLD:
             return score, MatchingStatus.SESUAI, f"Alamat sesuai ({score:.1f}%)"
         return score, MatchingStatus.PERLU_REVIEW, f"Alamat memiliki variasi ({score:.1f}%), perlu review"
 
@@ -215,7 +223,7 @@ def evaluate_field_sources(
     seen = set()
     for s in sources:
         key = (s.document_type, s.document_name, s.page, s.value)
-        if key not in seen and s.value.strip():
+        if key not in seen and s.value.strip() and s.value.strip() not in ("-", "—"):
             seen.add(key)
             unique_sources.append(s)
 
@@ -303,7 +311,7 @@ def _collect_field_sources(
             elif field_data:
                 val = str(field_data).strip()
 
-            if val:
+            if val and val not in ("-", "—"):
                 results.append(
                     SourceEvidence(
                         document_type=doc_type,
@@ -912,12 +920,21 @@ def cross_check_equipment(
                             s_serial = parts[1].strip()
                     else:
                         s_type = raw_uts.strip()
-                if s_brand:
-                    brand_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=s_brand, page=f.get("unit_brand", {}).get("page")))
-                if s_type:
-                    type_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=s_type, page=f.get("unit_type", {}).get("page") or f.get("unit_type_serial", {}).get("page")))
-                if s_serial:
-                    serial_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=s_serial, page=f.get("unit_serial_number", {}).get("page") or f.get("unit_type_serial", {}).get("page")))
+                is_match = False
+                if unit_serial and s_serial and (normalize_serial(unit_serial) == normalize_serial(s_serial) or normalize_serial(unit_serial) in normalize_serial(s_serial) or normalize_serial(s_serial) in normalize_serial(unit_serial)):
+                    is_match = True
+                elif unit_type and s_type and (normalize(unit_type) in normalize(s_type) or normalize(s_type) in normalize(unit_type)):
+                    is_match = True
+                elif not unit_serial and not s_serial and unit_brand and s_brand and normalize_brand(unit_brand) == normalize_brand(s_brand):
+                    is_match = True
+
+                if is_match or len(equipment_list) == 1:
+                    if s_brand:
+                        brand_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=s_brand, page=f.get("unit_brand", {}).get("page")))
+                    if s_type:
+                        type_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=s_type, page=f.get("unit_type", {}).get("page") or f.get("unit_type_serial", {}).get("page")))
+                    if s_serial:
+                        serial_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=s_serial, page=f.get("unit_serial_number", {}).get("page") or f.get("unit_type_serial", {}).get("page")))
 
         brand_check = evaluate_field_sources("unit_brand", "Merk unit", brand_sources, mode="brand")
         type_check = evaluate_field_sources("unit_type", "Tipe unit", type_sources, mode="fuzzy_text")
@@ -1006,6 +1023,13 @@ def cross_check_tubes(
             p_brand = str(f.get("tube_brand", {}).get("value") or "").strip()
             p_type = str(f.get("tube_type", {}).get("value") or "").strip()
             p_serial = str(f.get("tube_serial_number", {}).get("value") or "").strip()
+            if len(equipment_list) > 1:
+                ppkr_unit_sn = str(f.get("unit_serial_number", {}).get("value") or "").strip()
+                if eq and eq.unit_serial_number and eq.unit_serial_number.value and ppkr_unit_sn:
+                    if normalize_serial(ppkr_unit_sn) != normalize_serial(eq.unit_serial_number.value):
+                        continue
+                if t_serial and p_serial and normalize_serial(t_serial) != normalize_serial(p_serial):
+                    continue
             if p_brand:
                 brand_sources.append(SourceEvidence(document_type="ppkr", document_name=file_name, value=p_brand, page=f.get("tube_brand", {}).get("page")))
             if p_type:
@@ -1079,6 +1103,10 @@ def cross_check_tubes(
                             tb_s = raw_tts
                         elif not is_serial_like and (not tb_s or raw_tts != tb_s):
                             tb_m = raw_tts
+
+                if len(equipment_list) > 1 and not doc_unit_sn and t_serial and tb_s:
+                    if normalize_serial(t_serial) != normalize_serial(tb_s):
+                        continue
 
                 if tb_b:
                     brand_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=tb_b, page=f.get("tube_brand", {}).get("page")))

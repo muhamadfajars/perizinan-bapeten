@@ -282,6 +282,7 @@ def test_dynamic_unseen_brand_label():
 def test_parse_real_bapeten_documents():
     """Verify parsing of real-world BAPETEN documents (Sprint, TLD, Sistem Manajemen, Program Perawatan)."""
     from src.extraction.document_parser import parse_document
+    from src.schema.fields import DOCUMENT_FIELDS
 
     # 1. Sprint
     sprint_text = [
@@ -345,7 +346,7 @@ def test_parse_real_bapeten_documents():
     sm_res = parse_document("sistem_manajemen", [sm_p1, sm_p2])
     assert sm_res["fields"]["hospital_name"]["value"] == "RS TK IV PEKANBARU"
     assert sm_res["fields"]["hospital_address"]["value"] == "Jl. Kesehatan no 2 Pekanbaru Riau"
-    assert sm_res["fields"]["person_name"]["value"] == "dr.Adimas Okto Anugrah Sp.Rad"
+    assert "person_name" not in DOCUMENT_FIELDS["sistem_manajemen"]
     assert "document_number" not in sm_res["fields"]
     assert "document_date" not in sm_res["fields"]
 
@@ -356,7 +357,8 @@ def test_parse_real_bapeten_documents():
     pp_res = parse_document("program_perawatan", [pp_p1, pp_p2, pp_p24])
     assert pp_res["fields"]["hospital_name"]["value"] == "RS TK IV PEKANBARU"
     assert pp_res["fields"]["hospital_address"]["value"] == "Jl. Kesehatan no 2 Pekanbaru Riau"
-    assert pp_res["fields"]["person_name"]["value"] == "dr.Adimas Okto Anugrah Sp.Rad"
+    assert "person_name" not in DOCUMENT_FIELDS["program_perawatan"]
+    assert "conformity_test_clause" in pp_res["fields"]
     assert "document_number" not in pp_res["fields"]
     assert "document_date" not in pp_res["fields"]
     assert "terkait sesuai kewajiban" not in pp_res["fields"]["hospital_name"]["value"]
@@ -377,15 +379,15 @@ def test_parse_document_formulir_xray_separation():
     fake_pages = ["Formulir Permohonan\nInstansi: RS Pekanbaru\nAlamat: Jl. Sudirman"]
 
     res = parse_document("formulir", fake_pages, tables=fake_tables)
-    xray = res["fields"]["xray_data"]["value"]
+    f = res["fields"]
 
-    assert xray["unit_brand"] == "GE"
-    assert xray["unit_type"] == "Optima XR200amx"
-    assert xray["unit_serial_number"] == "SB2002000027WK"
-    assert xray["tube_brand"] == "Canon"
-    assert xray["tube_type"] == "E7894"
-    assert xray["tube_serial_number"] == "0F1376"
-    assert "max_kv" not in xray and "max_ma" not in xray
+    assert f["unit_brand"]["value"] == "GE"
+    assert f["unit_type"]["value"] == "Optima XR200amx"
+    assert f["unit_serial_number"]["value"] == "SB2002000027WK"
+    assert f["tube_brand"]["value"] == "Canon"
+    assert f["tube_type"]["value"] == "E7894"
+    assert f["tube_serial_number"]["value"] == "0F1376"
+    assert "xray_data" not in f
 
 
 def test_sprint_hospital_address_extraction():
@@ -453,6 +455,34 @@ def test_sib_card_layout_extraction():
     assert res["fields"]["valid_until"]["confidence"] == 1.0
 
 
+def test_sib_two_column_dual_language_extraction():
+    from src.extraction.document_parser import parse_document
+    sib_twocol = (
+        "BADAN PENGAWAS TENAGA NUKLIR\n"
+        "NUCLEAR ENERGY REGULATORY AGENCY\n"
+        "Izin Bekerja Petugas Fasilitas Radiasi dan Zat Radioaktif\n"
+        "Working Permit of Officer of Radiation Facilities and Radioactive Materials\n"
+        "No. SIB / Working Permit Number\n"
+        "352403.224.02.101123\n"
+        "PPR Medik Tk. 2\n"
+        "Jakarta, 10 November 2023 / 10th November 2023\n"
+        "Nama / Name a.n. KEPALA BAPETEN / p.p. Chairman of BAPETEN\n"
+        "Siti Azizah Direktur Perizinan Fasilitas Radiasi dan Zat Radioaktif\n"
+        "Berlaku s.d / Valid Until Director of Licensing for Radiation Facilities and Radioactive\n"
+        "27 Agustus 2027 / 27th August 2027 Materials\n"
+        "#\n"
+        "Ishak\n"
+        "NIP.197009102000121002\n"
+    )
+    res = parse_document("sib", [sib_twocol])
+    assert res["fields"]["ppr_name"]["value"] == "Siti Azizah"
+    assert res["fields"]["ppr_name"]["confidence"] == 1.0
+    assert res["fields"]["profession"]["value"] == "PPR Medik Tk. 2"
+    assert res["fields"]["profession"]["confidence"] == 1.0
+    assert res["fields"]["valid_until"]["value"] == "27/08/2027"
+    assert res["fields"]["valid_until"]["confidence"] == 1.0
+
+
 def test_spesifikasi_pesawat_brochure_extraction():
     from src.extraction.document_parser import parse_document
     brochure_p1 = (
@@ -468,6 +498,27 @@ def test_spesifikasi_pesawat_brochure_extraction():
     res = parse_document("spesifikasi_pesawat", [brochure_p1, brochure_p2])
     assert res["fields"]["unit_brand"]["value"] in ("GE Healthcare", "GE")
     assert "Optima XR200amx" in res["fields"]["unit_type"]["value"]
+
+
+def test_spesifikasi_pesawat_united_imaging_brochure_extraction():
+    from src.extraction.document_parser import parse_document
+    ui_p1 = (
+        "Shanghai United Imaging Healthcare Co., Ltd.\n"
+        "uDR 566i-A\n"
+        "uDR 566i-B\n"
+        "Motorized floor-mounted DR\n"
+        "Clarity. Experience.\n"
+    )
+    ui_p2 = (
+        "uDR 566i-A\n"
+        "uDR 566i-B\n"
+        "Ease of Use\n"
+    )
+    res = parse_document("spesifikasi_pesawat", [ui_p1, ui_p2])
+    assert res["fields"]["unit_brand"]["value"] == "United Imaging Healthcare"
+    assert res["fields"]["unit_type"]["value"] == "uDR 566i-A"
+    assert res["fields"]["unit_brand"]["confidence"] == 1.0
+    assert res["fields"]["unit_type"]["confidence"] == 1.0
 
 
 def test_formulir_omits_administrative_documents_and_npr():
@@ -613,7 +664,8 @@ def test_paparan_radiasi_extraction():
     assert f["tube_brand"]["value"] == "CANON"
     assert "E7894X" in f["tube_type_serial"]["value"]
     assert "20G225" in f["tube_type_serial"]["value"]
-    assert "radiation_exposure_acceptance" not in f
+    assert "radiation_exposure_acceptance" in f
+    assert f["radiation_exposure_acceptance"]["value"] == "-"
 
 
 def test_paparan_radiasi_insert_sn_priority():
@@ -707,9 +759,9 @@ def test_uji_fungsi_extraction():
     assert "XR200 AMX" in fp["unit_type_serial"]["value"]
     assert "SB2002000027WK" in fp["unit_type_serial"]["value"]
     assert fp["unit_serial_number"]["value"] == "SB2002000027WK"
-    assert fp["tube_brand"]["value"] == ""
+    assert fp["tube_brand"]["value"] == "-"
     assert "E7894" in fp["tube_type_serial"]["value"]
-    assert "20G225" in fp["tube_type_serial"]["value"]
+    assert "0F1376" in fp["tube_type_serial"]["value"]
 
     # 3. Test Philips / RSUD Ir. Soekarno CAF format (without tube details)
     soekarno_text = (
@@ -732,8 +784,9 @@ def test_uji_fungsi_extraction():
     assert "340" in fs["unit_type_serial"]["value"]
     assert fs["unit_serial_number"]["value"] == "340"
     # Tube details in Philips CAF are absent/empty without causing error
-    assert fs["tube_brand"]["value"] == ""
-    assert fs["tube_type_serial"]["value"] == ""
+    assert fs["tube_brand"]["value"] == "-"
+    assert fs["tube_type"]["value"] == "-"
+    assert fs["tube_serial_number"]["value"] == "-"
 
 
 def test_generalization_unseen_hospital_and_provinces():
@@ -820,10 +873,10 @@ def test_smart_hybrid_ocr_and_merge_for_scanned_tables():
     # Verify equipment & tube specs came from OCR scanned table seamlessly
     assert fields["unit_serial_number"]["value"] == "SB2002000027WK"
     assert "SB2002000027WK" in fields["unit_type_serial"]["value"]
-    assert fields["tube_serial_number"]["value"] == "20G225"
-    assert "20G225" in fields["tube_type_serial"]["value"]
+    assert fields["tube_serial_number"]["value"] == "0F1376"
+    assert "0F1376" in fields["tube_type_serial"]["value"]
     assert "E7894" in fields["tube_type_serial"]["value"]
-    assert fields["tube_brand"]["value"] == ""
+    assert fields["tube_brand"]["value"] == "-"
 
 
 def test_uji_fungsi_and_paparan_radiasi_address_name_boundary_fixes():
@@ -905,6 +958,84 @@ def test_multilingual_tube_synonym_variations():
     f_id = res_id["fields"]
     assert f_id["tube_serial_number"]["value"] == "0F8888"
     assert f_id["tube_type"]["value"] == "E7894"
+
+
+def test_parse_sprint_sk_decree_format():
+    """Verify parsing of SK decree format for Surat Perintah (Sprint),
+    preventing false matches on preamble legal text and correctly extracting
+    PPR person and director signer."""
+    from src.extraction.document_parser import parse_document
+
+    page1_text = (
+        "PT MEDIKA LOKA KEPANJEN\n"
+        "RUMAH SAKIT HERMINA KEPANJEN\n"
+        "Jalan Raya Mojosari RT 02/RW 01, Kelurahan Mojosari, Kecamatan Kepanjen, Malang\n"
+        "KEPUTUSAN DIREKTUR RUMAH SAKIT HERMINA KEPANJEN\n"
+        "NOMOR 016/KEP-DIR/RSHKPN/VI/2026\n"
+        "TENTANG\n"
+        "PENUNJUKKAN DAN PENGANGKATAN\n"
+        "SDR/I SITI AZIZAH\n"
+        "SEBAGAI\n"
+        "PETUGAS PROTEKSI RADIASI (PPR)\n"
+        "RUMAH SAKIT HERMINA KEPANJEN\n"
+        "DIREKTUR RUMAH SAKIT HERMINA KEPANJEN,\n"
+        "Menimbang : a. bahwa dalam upaya meningkatkan mutu pelayanan kesehatan kepada pasien, "
+        "maka diperlukan adanya seorang Petugas Proteksi Radiasi di Instalasi Radiologi;\n"
+        "b. bahwa Sdr/i Siti Azizah dinilai mampu dan cakap sebagai Petugas Proteksi Radiasi (PPR);\n"
+        "Mengingat : 5. Tentang Pengesahan Peraturan Perusahaan PT Medikaloka Hermina Tbk;\n"
+    )
+
+    page2_text = (
+        "MEMUTUSKAN :\n"
+        "Menetapkan : KEPUTUSAN DIREKTUR TENTANG PENUNJUKAN DAN PENGANGKATAN SDR/I SITI AZIZAH SEBAGAI PPR.\n"
+        "Ditetapkan di Kepanjen\n"
+        "Pada tanggal 09 Juni 2026\n"
+        "DIREKTUR,\n"
+        "\n"
+        "dr. DEDE SETYADI, MARS\n"
+    )
+
+    res = parse_document("sprint", [page1_text, page2_text])
+    f = res["fields"]
+
+    # PPR Name should be SITI AZIZAH, NOT 'pasien'
+    assert f["ppr_name"]["value"] == "SITI AZIZAH"
+    assert f["ppr_name"]["page"] == 1
+
+    # Approval should be dr. DEDE SETYADI, MARS, NOT 'Peraturan Perusahaan...'
+    assert f["approval"]["value"] == "dr. DEDE SETYADI, MARS"
+    assert f["approval"]["page"] == 2
+
+
+def test_ppkr_tube_insert_serial_priority():
+    from src.extraction.document_parser import parse_document
+
+    p14_text = (
+        "III.1.1. Spesifikasi Teknis Pesawat General Radiografi\n"
+        "Nama ruangan : Radiologi\n"
+        "Data pesawat\n"
+        "Merk pesawat sinar-X : GE\n"
+        "Tipe/model pesawat sinar-X : OPTIMA XR200AMX\n"
+        "No. Seri pesawat sinar-X : SB2002000027WK\n"
+        "Data tabung\n"
+        "Merk tabung : CANON\n"
+        "Tipe tabung : E7894X\n"
+        "No. Seri tabung : 20G225\n"
+        "Nomor seriinsersi 0F1376\n"
+        "tabung sinar X\n"
+    )
+
+    res = parse_document("ppkr", [p14_text])
+    f = res["fields"]
+
+    assert f["unit_brand"]["value"] == "GE"
+    assert f["unit_type"]["value"] == "OPTIMA XR200AMX"
+    assert f["unit_serial_number"]["value"] == "SB2002000027WK"
+    assert f["tube_brand"]["value"] == "CANON"
+    assert f["tube_type"]["value"] == "E7894X"
+    assert f["tube_serial_number"]["value"] == "0F1376"
+    assert f["tube_type_serial"]["value"] == "E7894X / 0F1376"
+
 
 
 

@@ -8,7 +8,7 @@ INDONESIAN_MONTHS = {
 
 
 def normalize(value):
-    if value is None:
+    if value is None or str(value).strip() in ("-", "—"):
         return ""
     return re.sub(r"[^A-Z0-9]", "", str(value).upper())
 
@@ -20,6 +20,8 @@ def normalize_serial(value):
 
 def normalize_date(text):
     text = str(text or "").strip()
+    if not text or text in ("-", "—"):
+        return "-"
     m = re.search(r"(\d{1,2})\s*([A-Za-z]+)\s*(\d{4})", text)
     if m:
         day, month_name, year = m.groups()
@@ -89,6 +91,7 @@ BRAND_CANONICAL_MAP = {
     "VARIAN": ["VARIAN", "VARIAN MEDICAL SYSTEMS"],
     "DUNLEE": ["DUNLEE", "DUNLEE HEALTHCARE"],
     "ALLENGERS": ["ALLENGERS", "ALLENGERS MEDICAL SYSTEMS"],
+    "UNITED IMAGING": ["UNITED IMAGING", "UNITED IMAGING HEALTHCARE", "SHANGHAI UNITED IMAGING HEALTHCARE", "SHANGHAI UNITED IMAGING HEALTHCARE CO., LTD.", "SHANGHAI UNITED IMAGING HEALTHCARE CO., LTD", "SHANGHAI UNITED IMAGING HEALTHCARE CO LTD", "UIH"],
 }
 
 
@@ -110,10 +113,17 @@ def normalize_address(address: str) -> str:
         return ""
     text = str(address).strip()
 
+    # Strip test inspection checklist tokens (e.g. Collimator Rotation PASS, Tube tilt PASS)
+    text = re.sub(r"\s*\b(?:COLLIMATOR(?:\s+ROTATION)?|TUBE(?:\s+TILT)?|MECHANICAL|INSPEC|BRAKE|BATERE|STATUS)\s*(?:PASS|FAIL)?\b.*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*\b(?:PASS|FAIL)\b.*$", "", text, flags=re.IGNORECASE)
+
     # 1. Strip facility prefix if address starts with hospital/facility name before comma or street marker
     # e.g. 'Rumkit Tentara Tk IV 01.07.04 Pekanbaru, Jl. Kesehatan No. 2 Kampung'
     p_fac = r"^(?:RUMAH\s+SAKIT|RUMKIT|RSU|RSUD|RSUP|RSIA|RS|KLINIK|PUSKESMAS|BALAI|PT|CV)\b.*?(?:[,;\-]|\b(?=JL|JALAN\b))\s*"
     text = re.sub(p_fac, "", text, flags=re.IGNORECASE).strip()
+
+    # Unglue OCR typo where 'no' or 'n' or 'nn' is glued with 0, dots, or digits e.g. Kesehatann0.02 -> Kesehatan NO 2
+    text = re.sub(r"([A-Za-z]+?)nn0*\.?0*([1-9]\d*)\b", r"\1n NO \2", text, flags=re.IGNORECASE)
 
     # 2. Unglue punctuation between alphanumerics (e.g. Jl.Kesehatan -> Jl . Kesehatan, no.02 -> no . 02)
     text = re.sub(r"([A-Za-z0-9])([.,/-])([A-Za-z0-9])", r"\1 \2 \3", text)
@@ -161,8 +171,15 @@ def normalize_facility_name(name: str) -> str:
     if not name:
         return ""
     text = str(name).upper()
+    # Strip test inspection checklist tokens (e.g. Tube tilt PASS, Collimator Rotation PASS)
+    text = re.sub(r"\b(?:TUBE(?:\s+TILT)?|COLLIMATOR(?:\s+ROTATION)?|COLIMATOR|MECHANICAL|INSPEC|BRAKE|BATERE|STATUS)\s*(?:PASS|FAIL)?\b.*$", "", text)
+    text = re.sub(r"\b(?:PASS|FAIL)\b.*$", "", text)
+    # Strip military unit / detachment codes e.g. 01.07.04 or 01 07 04
+    text = re.sub(r"\b\d{2}[\s.]\d{2}[\s.]\d{2}\b", "", text)
     text = re.sub(r"\bRUMAH\s+SAKIT\b|\bRUMKIT\b", "RS", text)
     text = re.sub(r"\bRSU\b|\bRSUD\b|\bRSUP\b|\bRSIA\b", "RS", text)
     text = re.sub(r"\bTINGKAT\b", "TK", text)
+    # Normalize military hospital descriptor
+    text = re.sub(r"\bRS\s+TENTARA\b", "RS", text)
     cleaned = re.sub(r"[^A-Z0-9\s]", " ", text)
     return " ".join(cleaned.split())

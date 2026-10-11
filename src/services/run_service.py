@@ -174,12 +174,15 @@ def _process_label(doc_type, path, run_id):
         for key in all_keys:
             left = orig_fields.get(key, {})
             right = preprocessed["fields"].get(key, {})
-            if left.get("value") not in ("", None):
+            if left.get("value") not in ("", None, "-", "—"):
                 fields[key] = left
-            elif right.get("value") not in ("", None):
+            elif right.get("value") not in ("", None, "-", "—"):
                 fields[key] = {**right, "method": "ocr_preprocessed"}
             else:
-                fields[key] = left or right or {"value": "", "method": "not_found"}
+                fields[key] = left or right or {"value": "-", "method": "not_found"}
+
+        from src.extraction.document_parser import _finalize_document_fields
+        fields = _finalize_document_fields(doc_type, fields)
 
         return {
             "document_type": doc_type,

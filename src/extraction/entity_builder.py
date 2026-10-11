@@ -24,8 +24,10 @@ from src.extraction.form_parser import build_application_from_form
 
 def _get_val(field_dict_or_val: Any) -> str:
     if isinstance(field_dict_or_val, dict):
-        return str(field_dict_or_val.get("value") or "").strip()
-    return str(field_dict_or_val or "").strip()
+        v = str(field_dict_or_val.get("value") or "").strip()
+    else:
+        v = str(field_dict_or_val or "").strip()
+    return "" if v in ("-", "—") else v
 
 
 def _get_page(field_dict: Any) -> Optional[int]:
@@ -142,15 +144,28 @@ def consolidate_application(extractions: Dict[str, List[Dict[str, Any]]]) -> App
         parsed_fields = form_doc.get("fields", {})
         # Check if form_doc has raw parsed structure or fields
         file_name = form_doc.get("file_name", "Formulir_Permohonan.pdf")
-        # In run_service, fields has hospital_name, xray_data, personnel_data, etc.
+        all_xr = parsed_fields.get("all_xray_rows", [])
+        if isinstance(all_xr, dict):
+            all_xr = all_xr.get("value", [])
+        if not all_xr:
+            xr_fallback = {
+                "unit_brand": _get_val(parsed_fields.get("unit_brand")),
+                "unit_type": _get_val(parsed_fields.get("unit_type")),
+                "unit_serial_number": _get_val(parsed_fields.get("unit_serial_number")),
+                "tube_brand": _get_val(parsed_fields.get("tube_brand")),
+                "tube_type": _get_val(parsed_fields.get("tube_type")),
+                "tube_serial_number": _get_val(parsed_fields.get("tube_serial_number")),
+            }
+            if any(xr_fallback.values()):
+                all_xr = [xr_fallback]
+
         form_dict = {
             "header": parsed_fields.get("header", {}),
             "hospital_name": parsed_fields.get("hospital_name", {}),
             "hospital_address": parsed_fields.get("hospital_address", {}),
-            "personnel_data": parsed_fields.get("personnel_data", {}).get("value", []),
-            "xray_data": parsed_fields.get("xray_data", {}).get("value", {}),
-            "administrative_documents": parsed_fields.get("administrative_documents", {}).get("value", []),
-            "all_xray_rows": parsed_fields.get("all_xray_rows", []),
+            "personnel_data": parsed_fields.get("personnel_data", {}).get("value", []) if isinstance(parsed_fields.get("personnel_data"), dict) else parsed_fields.get("personnel_data", []),
+            "administrative_documents": parsed_fields.get("administrative_documents", {}).get("value", []) if isinstance(parsed_fields.get("administrative_documents"), dict) else parsed_fields.get("administrative_documents", []),
+            "all_xray_rows": all_xr,
         }
         app = build_application_from_form(form_dict, file_name=file_name)
     else:

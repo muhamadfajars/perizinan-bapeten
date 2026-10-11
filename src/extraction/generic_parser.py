@@ -19,8 +19,6 @@ FIELD_LABELS = {
     "tube_type": ["Tipe Tabung", "Type Tabung", "Model Tabung", "Tube Model"],
     "tube_model": ["Model Tabung", "Tube Model"],
     "tube_serial_number": ["Nomor seri insersi tabung sinar X", "Nomor seri insersi", "No Seri Tabung", "No. Seri Tabung", "Serial Number Tabung", "S/N Tabung"],
-    "document_number": ["Nomor Dokumen", "No. Dokumen", "Nomor Dok", "No Dokumen"],
-    "document_date": ["Tanggal", "Tanggal Dokumen", "Tanggal Pengesahan"],
     "usage_period": ["Periode Pemakaian", "Periode Penggunaan", "Periode"],
     "radiation_exposure_acceptance": ["Keberterimaan Paparan Radiasi", "Keberterimaan", "Kesimpulan", "Hasil Pengukuran"],
     "conformity_test_clause": ["Klausul Uji Kesesuaian", "Uji Kesesuaian", "Klausul"],
@@ -134,6 +132,11 @@ def extract_facility_address(pages_text: List[str]) -> Tuple[str, Optional[int]]
             for m in re.finditer(pat, page, re.IGNORECASE):
                 val = clean_value(m.group(1))
                 val = re.split(r"[\r\n]|\||Telp|Email|Fax|Tanggal", val, flags=re.IGNORECASE)[0].strip(" :;-,")
+                val = re.split(
+                    r"\b(?:Tube(?:\s+tilt)?|Collimator(?:\s+Rotation)?|Mechanical|InSpec|Status|Brake|Batere|PASS|FAIL)\b",
+                    val,
+                    flags=re.I,
+                )[0].strip(" :;-,")
                 if len(val) >= 6:
                     return val, p_idx
 
@@ -146,6 +149,11 @@ def extract_facility_address(pages_text: List[str]) -> Tuple[str, Optional[int]]
                 cand = clean_value(m.group(1))
                 cand = re.split(
                     r"\||Telp|Email|Fax|Kode\s*Pos|website|\b08\d{2}[-\s]?\d{3,4}|\b\d{4}[-\s]\d{4}|\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+                    cand,
+                    flags=re.I,
+                )[0].strip(" :;-,")
+                cand = re.split(
+                    r"\b(?:Tube(?:\s+tilt)?|Collimator(?:\s+Rotation)?|Mechanical|InSpec|Status|Brake|Batere|PASS|FAIL)\b",
                     cand,
                     flags=re.I,
                 )[0].strip(" :;-,")
@@ -258,19 +266,6 @@ def extract_generic_fields(pages_text: List[str], field_keys: List[str]) -> dict
                 "confidence": 1.0,
             }
 
-    if "document_number" in field_keys:
-        for p_idx, p_text in enumerate(pages_text, start=1):
-            d_val = find_document_number(p_text)
-            if d_val:
-                result["document_number"] = {
-                    "value": d_val,
-                    "page": p_idx,
-                    "line": None,
-                    "method": "native_text_regex",
-                    "confidence": 1.0,
-                }
-                break
-
     if "person_name" in field_keys:
         p_val, p_page = extract_person_name(pages_text)
         if p_val:
@@ -287,7 +282,7 @@ def extract_generic_fields(pages_text: List[str], field_keys: List[str]) -> dict
             if result[key]["value"]:
                 continue
 
-            if key in {"hospital_name", "hospital_address", "document_number", "person_name"}:
+            if key in {"hospital_name", "hospital_address", "person_name"}:
                 continue
             elif key in FIELD_LABELS:
                 value, line_index = find_labeled_value(page_text, FIELD_LABELS[key])
@@ -295,7 +290,7 @@ def extract_generic_fields(pages_text: List[str], field_keys: List[str]) -> dict
                 value, line_index = "", None
 
             if value:
-                if key in {"valid_until", "document_date"}:
+                if key == "valid_until":
                     value = normalize_date(value)
                 result[key] = {
                     "value": value,

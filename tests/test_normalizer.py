@@ -5,6 +5,7 @@ from src.matching.normalizer import (
     normalize_person_name,
     normalize_address,
     normalize_brand,
+    normalize_facility_name,
 )
 
 
@@ -32,9 +33,19 @@ def test_normalize_address():
     assert normalize_address("Jl.Kesehatanno2PekanbaruRiau") == "JL KESEHATAN NO 2 PEKANBARU RIAU"
     assert normalize_address("Jl.Kesehatanno.02") == "JL KESEHATAN NO 2"
     assert normalize_address("Rumkit Tentara Tk IV 01.07.04 Pekanbaru, Jl. Kesehatan No. 2 Kampung") == "JL KESEHATAN NO 2 KP"
+    # Strips CAF/Uji Fungsi mechanical test checklist artifacts
+    assert normalize_address("Jl. Kesehatan No.2, Kp. Bandar, Kec. Senapelan, Kota Pekanbaru, Riau Collimator Rotation PASS") == "JL KESEHATAN NO 2 KP BANDAR KEC SENAPELAN PEKANBARU RIAU"
+    # OCR typo ungluing
+    assert normalize_address("JL. Kesehatann0.02") == "JL KESEHATAN NO 2"
+
+
+def test_normalize_facility_name():
+    assert normalize_facility_name("Rumkit Tentara Tk IV 01.07.04 Pekanbaru") == "RS TK IV PEKANBARU"
+    assert normalize_facility_name("Rumkit Tk. IV Pekanbaru Tube tilt PASS") == "RS TK IV PEKANBARU"
 
 
 def test_normalize_brand():
     assert normalize_brand("SHIMADZU CORPORATION") == "SHIMADZU"
     assert normalize_brand("GE HEALTHCARE") == "GE"
     assert normalize_brand("CANON ELECTRON TUBES & DEVICES CO., LTD.") == "CANON"
+

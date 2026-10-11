@@ -217,12 +217,20 @@ def parse_label_unit(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
     if unit_type:
         unit_type = re.sub(r"\s+\d+\s*KW\b", "", unit_type, flags=re.IGNORECASE).strip()
 
+    unit_type_serial = f"{unit_type} / {serial}".strip(" /") if (unit_type or serial) else ""
+
     return {
         "unit_brand": {
             "value": brand,
             "method": "ocr",
             "raw_text": brand_line.get("text") if brand_line else "",
             "bbox": _extract_bbox(brand_line),
+        },
+        "unit_type_serial": {
+            "value": unit_type_serial,
+            "method": "composite",
+            "raw_text": f"{type_line.get('text', '') if type_line else ''} {serial_line.get('text', '') if serial_line else ''}".strip(),
+            "bbox": None,
         },
         "unit_serial_number": {
             "value": serial,
@@ -259,6 +267,9 @@ def parse_label_tube(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
     m2_val, m2_line = (models[1][1], models[1][2]) if len(models) > 1 else ("", None)
     s_val, s_line = (serials[-1][1], serials[-1][2]) if serials else ("", None)
 
+    tube_model = m2_val or m1_val
+    tube_type_serial = f"{tube_model} / {s_val}".strip(" /") if (tube_model or s_val) else ""
+
     return {
         "tube_unit_model": {
             "value": m1_val,
@@ -271,6 +282,18 @@ def parse_label_tube(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
             "method": "ocr",
             "raw_text": m2_line.get("text") if m2_line else "",
             "bbox": _extract_bbox(m2_line),
+        },
+        "tube_type": {
+            "value": tube_model,
+            "method": "ocr",
+            "raw_text": (m2_line or m1_line).get("text") if (m2_line or m1_line) else "",
+            "bbox": _extract_bbox(m2_line or m1_line),
+        },
+        "tube_type_serial": {
+            "value": tube_type_serial,
+            "method": "composite",
+            "raw_text": f"{(m2_line or m1_line).get('text', '') if (m2_line or m1_line) else ''} {s_line.get('text', '') if s_line else ''}".strip(),
+            "bbox": None,
         },
         "tube_serial_number": {
             "value": s_val,
@@ -294,6 +317,8 @@ def extract_label_data(lines: List[Dict[str, Any]], doc_type: str) -> Dict[str, 
         value = item.get("value", "")
         conf = _first_conf(lines, value) if value else 0.0
         item["confidence"] = conf
+    from src.extraction.document_parser import _finalize_document_fields
+    values = _finalize_document_fields(doc_type, values)
     return {"document_type": doc_type, "fields": values}
 
 

@@ -66,7 +66,47 @@ def crop_sprint_signature_stamp(
 
     w, h = pil_img.size
 
-    # Attempt to use OCR cache anchors if PDF path is provided
+    # 1. Attempt to use pdfplumber word anchors for vector/digital PDFs
+    if pdf_path is not None:
+        try:
+            import pdfplumber
+            with pdfplumber.open(str(pdf_path)) as pdf:
+                if 0 <= page_idx < len(pdf.pages):
+                    page_obj = pdf.pages[page_idx]
+                    pw, ph = page_obj.width, page_obj.height
+                    words = page_obj.extract_words()
+                    sig_words = [
+                        w_item for w_item in words
+                        if w_item.get("top", 0) > ph * 0.50
+                        and any(re.search(pat, w_item.get("text", ""), re.I) for pat in [
+                            r"^(?:Kepala|Direktur|Komandan|Pimpinan|Karumkit)\b",
+                            r"\bdr\.?\b",
+                            r"\bSp\.[A-Za-z]+",
+                            r"\b(?:Mayor|Letkol|Kapten|Kolonel|PNS|NIP|NRP)\b",
+                            r"\b(?:Ditetapkan|Dikeluarkan)\b",
+                            r"\bMARS\b",
+                        ])
+                    ]
+                    if sig_words:
+                        min_x = min(w_item["x0"] for w_item in sig_words)
+                        max_x = max(w_item["x1"] for w_item in sig_words)
+                        min_y = min(w_item["top"] for w_item in sig_words)
+                        max_y = max(w_item["bottom"] for w_item in sig_words)
+                        scale_x = w / pw
+                        scale_y = h / ph
+                        crop_x1 = max(0, int((min_x - 120) * scale_x))
+                        crop_y1 = max(0, int((min_y - 25) * scale_y))
+                        crop_x2 = min(w, int((max_x + 90) * scale_x))
+                        crop_y2 = min(h, int((max_y + 45) * scale_y))
+                        crop_x1 = max(0, min(crop_x1, w - 10))
+                        crop_y1 = max(0, min(crop_y1, h - 10))
+                        crop_x2 = max(crop_x1 + 10, min(crop_x2, w))
+                        crop_y2 = max(crop_y1 + 10, min(crop_y2, h))
+                        return pil_img.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+        except Exception:
+            pass
+
+    # 2. Attempt to use OCR cache anchors if PDF path is provided
     lines = []
     if pdf_path is not None:
         file_hash = get_file_hash(str(pdf_path))
@@ -108,14 +148,14 @@ def crop_sprint_signature_stamp(
         crop_x1 = max(0, int(min_x - 140))
         crop_y1 = max(0, int(min_y - 45))
         crop_x2 = min(w, int(max_x + 360))
-        crop_y2 = min(h, int(max_y + 45))
+        crop_y2 = min(h, int(max_y + 90))
     else:
         # Standard fallback heuristic for Indonesian official documents:
-        # bottom-right signature quadrant (y: 53%-88%, x: 48%-96%)
-        crop_x1 = int(w * 0.48)
+        # bottom-right signature quadrant (y: 53%-94%, x: 45%-98%)
+        crop_x1 = int(w * 0.45)
         crop_y1 = int(h * 0.53)
-        crop_x2 = int(w * 0.96)
-        crop_y2 = int(h * 0.88)
+        crop_x2 = int(w * 0.98)
+        crop_y2 = int(h * 0.94)
 
     # Ensure valid bounding box
     crop_x1 = max(0, min(crop_x1, w - 10))

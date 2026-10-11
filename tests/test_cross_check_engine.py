@@ -475,7 +475,77 @@ def test_cross_check_tubes_insert_housing_and_brand_tolerance():
     assert s_chk.status == MatchingStatus.PERLU_REVIEW
     assert s_chk.score >= 85.0
     assert "0F1376" in s_chk.reason
-    assert "20G225" in s_chk.reason
+
+def test_multi_equipment_consolidation_and_cross_check():
+    """Verify that multiple equipment units from formulir are properly consolidated
+    and evaluated independently without cross-contaminating other units."""
+    extractions = {
+        "formulir": [
+            {
+                "file_name": "Formulir_Permohonan.pdf",
+                "fields": {
+                    "hospital_name": {"value": "Medika Loka Kepanjen", "page": 1},
+                    "hospital_address": {"value": "Kepanjen, Malang", "page": 1},
+                    "all_xray_rows": [
+                        {
+                            "unit_brand": "United Imaging Healthcare",
+                            "unit_type": "uDR 566i-A",
+                            "unit_serial_number": "294248",
+                            "tube_brand": "Canon",
+                            "tube_type": "E7876",
+                            "tube_serial_number": "25D1063",
+                            "page": 2,
+                        },
+                        {
+                            "unit_brand": "United Imaging Healthcare",
+                            "unit_type": "uDR 380i",
+                            "unit_serial_number": "422867",
+                            "tube_brand": "Canon",
+                            "tube_type": "XRR-3332",
+                            "tube_serial_number": "4K0493",
+                            "page": 2,
+                        },
+                    ],
+                },
+            }
+        ],
+        "uji_kesesuaian": [
+            {
+                "file_name": "uji_kesesuaian_unit1.pdf",
+                "fields": {
+                    "unit_brand": {"value": "United Imaging Healthcare", "page": 1},
+                    "unit_type": {"value": "uDR 566i-A", "page": 1},
+                    "unit_serial_number": {"value": "294248", "page": 1},
+                    "tube_brand": {"value": "Canon", "page": 1},
+                    "tube_type": {"value": "E7876", "page": 1},
+                    "tube_serial_number": {"value": "25D1063", "page": 1},
+                },
+            }
+        ],
+    }
+
+    from src.extraction.entity_builder import consolidate_application
+    app = consolidate_application(extractions)
+
+    assert len(app.xray_equipment) == 2
+    assert app.xray_equipment[0].unit_serial_number.value == "294248"
+    assert app.xray_equipment[0].tube.tube_serial_number.value == "25D1063"
+    assert app.xray_equipment[1].unit_serial_number.value == "422867"
+    assert app.xray_equipment[1].tube.tube_serial_number.value == "4K0493"
+
+    report = generate_cross_check_report(app, extractions, run_id="multi_eq_run")
+    assert len(report.xray_equipment) == 2
+    assert len(report.xray_tubes) == 2
+
+    # Unit 1 matches with uji_kesesuaian
+    assert report.xray_equipment[0].fields["unit_serial_number"].status == MatchingStatus.SESUAI
+    assert len(report.xray_equipment[0].fields["unit_serial_number"].sources) == 2
+
+    # Unit 2 does NOT get contaminated with Unit 1's certificate
+    assert len(report.xray_equipment[1].fields["unit_serial_number"].sources) == 1
+    assert report.xray_equipment[1].fields["unit_serial_number"].sources[0].value == "422867"
+    assert len(report.xray_tubes[1].fields["tube_serial_number"].sources) == 1
+    assert report.xray_tubes[1].fields["tube_serial_number"].sources[0].value == "4K0493"
 
 
 

@@ -3,7 +3,7 @@ from collections import defaultdict
 from rapidfuzz import fuzz
 
 from config import BRAND_ALIASES, BRAND_FULL_NAMES, MATCH_THRESHOLD, REVIEW_THRESHOLD, BRAND_FUZZY_THRESHOLD, ADDRESS_MATCH_THRESHOLD
-from src.matching.normalizer import normalize, normalize_serial, normalize_address
+from src.matching.normalizer import normalize, normalize_serial, normalize_address, normalize_facility_name
 from src.schema.fields import CROSS_CHECK_RULES
 
 STATUS_OK = "SESUAI"
@@ -55,18 +55,19 @@ def compare_values(left, right, mode="fuzzy_text"):
             return score, STATUS_REVIEW
         return score, STATUS_MISMATCH
 
-    score = fuzz.token_sort_ratio(l_norm, r_norm)
-    if mode == "fuzzy_name":
-        # Exact normalized equality is already handled above. If the normalized
-        # strings differ, a high similarity still deserves a warning because
-        # the source requirement explicitly calls for review of name variations.
-        if score >= MATCH_THRESHOLD:
-            return score, STATUS_WARNING
-        if score >= 70:
-            return score, STATUS_WARNING
+    if mode in ("facility_name", "fuzzy_name"):
+        l_fac = normalize_facility_name(left)
+        r_fac = normalize_facility_name(right)
+        if l_fac == r_fac:
+            return 100.0, STATUS_OK
+        score = max(fuzz.token_sort_ratio(l_fac, r_fac), fuzz.token_set_ratio(l_fac, r_fac))
+        if fuzz.token_set_ratio(l_fac, r_fac) >= 80.0 or score >= MATCH_THRESHOLD:
+            return score, STATUS_OK
         if score >= REVIEW_THRESHOLD:
             return score, STATUS_REVIEW
         return score, STATUS_MISMATCH
+
+    score = fuzz.token_sort_ratio(l_norm, r_norm)
 
     if mode == "fuzzy_address":
         l_addr = normalize_address(left)
@@ -78,10 +79,10 @@ def compare_values(left, right, mode="fuzzy_text"):
             fuzz.partial_ratio(l_addr, r_addr),
             fuzz.token_set_ratio(l_addr, r_addr),
         )
-        if score >= ADDRESS_MATCH_THRESHOLD:
+        if max(fuzz.token_set_ratio(l_addr, r_addr), fuzz.partial_ratio(l_addr, r_addr)) >= 75.0:
+            return 100.0, STATUS_OK
+        if score >= 75.0 or score >= ADDRESS_MATCH_THRESHOLD:
             return score, STATUS_OK
-        if score >= 70:
-            return score, STATUS_WARNING
         if score >= REVIEW_THRESHOLD:
             return score, STATUS_REVIEW
         return score, STATUS_MISMATCH
@@ -114,20 +115,6 @@ def _field_values(document_result, field):
                 values.append({"value": person["role"], "page": people.get("page")})
             elif field == "ppr_name" and person.get("name") and "PPR" in str(person.get("role", "")).upper():
                 values.append({"value": person["name"], "page": people.get("page")})
-
-    xray = fields.get("xray_data", {})
-    if isinstance(xray, dict) and isinstance(xray.get("value"), dict):
-        mapping = {
-            "unit_brand": "unit_brand",
-            "unit_type": "unit_type",
-            "unit_serial_number": "unit_serial_number",
-            "tube_brand": "tube_brand",
-            "tube_type": "tube_type",
-            "tube_serial_number": "tube_serial_number",
-        }
-        key = mapping.get(field)
-        if key and xray["value"].get(key):
-            values.append({"value": xray["value"][key], "page": xray.get("page")})
 
     # Remove exact duplicates while preserving source order.
     unique = []

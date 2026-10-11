@@ -29,10 +29,12 @@ ADDRESS_MATCH_THRESHOLD = 85.0
 BRAND_ALIASES = {
     "GE": ["GENERAL ELECTRIC", "GE HEALTHCARE", "GE MEDICAL"],
     "CANON": ["CANON"],
+    "UNITED IMAGING": ["UNITED IMAGING HEALTHCARE", "SHANGHAI UNITED IMAGING HEALTHCARE", "UIH"],
 }
 BRAND_FULL_NAMES = {
     "GE": ["General Electric Company"],
     "CANON": ["Canon Electron Tubes & Devices Co., Ltd."],
+    "UNITED IMAGING": ["Shanghai United Imaging Healthcare Co., Ltd."],
 }
 
 # Extraction scope comes from the user's field-identification document.

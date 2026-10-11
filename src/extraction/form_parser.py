@@ -535,10 +535,17 @@ def build_application_from_form(
 
     # X-Ray Equipment
     equipment_list: List[XRayEquipmentEntity] = []
-    all_rows = parsed_form.get("all_xray_rows", []) or [parsed_form.get("xray_data", {})]
+    all_rows = parsed_form.get("all_xray_rows", [])
+    if isinstance(all_rows, dict) and "value" in all_rows:
+        all_rows = all_rows["value"]
+    if not all_rows:
+        xr = parsed_form.get("xray_data", {})
+        if isinstance(xr, dict) and "value" in xr and isinstance(xr["value"], dict):
+            xr = xr["value"]
+        all_rows = [xr] if xr else []
 
     for idx, row in enumerate(all_rows, start=1):
-        if not any(row.values()):
+        if not isinstance(row, dict) or not any(row.values()):
             continue
         page = row.get("page")
 
