@@ -642,6 +642,39 @@ def test_persetujuan_import_extraction():
     assert f["tube_type_serial"]["value"] == "MRC 200 0407 / 414822"
 
 
+def test_persetujuan_import_multi_row_pekanbaru_selection():
+    from src.extraction.document_parser import parse_document
+    fake_tables = [
+        (
+            1,
+            [
+                ["No. Izin: 090049.035.11.281019", None, None, None, None, None],
+                ["No", "Nama Sumber", "Tipe/No Seri", "HS", "Jumlah", "Pemakai"],
+                ["1", "GE Mobile", "Optima XR200amx/System S/N:SB2002000019WK Tube S/N:20G130", "90221400", "1", "PT. Glomeda-Rumkit Tk. II / Putri Hijau Medan"],
+                ["2", "GE Mobile", "Optima XR200amx/System S/N:SB2002000020WK Tube S/N:20G228", "90221400", "1", "PT. Glomeda-Rumkit Tk. III / dr. Reksodiwiryo Padang"],
+                ["6", "GE Mobile", "Optima XR200amx/System S/N:SB2002000027WK Tube S/N:20G225", "90221400", "1", "PT. Glomeda-Rumkit Tk. IV / Pekanbaru"],
+                ["7", "GE Mobile", "Optima XR200amx/System S/N:SB2002000029WK Tube S/N:20G1005", "90221400", "1", "PT. Glomeda-Rumkit Tk. IV / Binjai"],
+            ],
+        )
+    ]
+    # Test 1: With context specifying Pekanbaru
+    ctx = {"hospital_name": "Rumkit Tentara Tk IV 01.07.04 Pekanbaru", "unit_serial_number": "SB2002000027WK"}
+    res = parse_document("persetujuan_import", ["Page 1", "Page 2"], tables=fake_tables, context=ctx)
+    f = res["fields"]
+    assert f["unit_brand"]["value"] == "GE"
+    assert f["unit_type"]["value"] == "Optima XR200amx"
+    assert f["unit_serial_number"]["value"] == "SB2002000027WK"
+    assert f["tube_type"]["value"] == "-"
+    assert f["tube_serial_number"]["value"] == "-"
+
+    # Test 2: Without context (domain heuristic matches Pekanbaru over Medan)
+    res2 = parse_document("persetujuan_import", ["Page 1", "Page 2"], tables=fake_tables)
+    f2 = res2["fields"]
+    assert f2["unit_serial_number"]["value"] == "SB2002000027WK"
+    assert f2["tube_type"]["value"] == "-"
+    assert f2["tube_serial_number"]["value"] == "-"
+
+
 def test_paparan_radiasi_extraction():
     from src.extraction.document_parser import parse_document
     p1_ocr = (
@@ -761,7 +794,7 @@ def test_uji_fungsi_extraction():
     assert fp["unit_serial_number"]["value"] == "SB2002000027WK"
     assert fp["tube_brand"]["value"] == "-"
     assert "E7894" in fp["tube_type_serial"]["value"]
-    assert "0F1376" in fp["tube_type_serial"]["value"]
+    assert "20G225" in fp["tube_type_serial"]["value"]
 
     # 3. Test Philips / RSUD Ir. Soekarno CAF format (without tube details)
     soekarno_text = (
@@ -873,8 +906,8 @@ def test_smart_hybrid_ocr_and_merge_for_scanned_tables():
     # Verify equipment & tube specs came from OCR scanned table seamlessly
     assert fields["unit_serial_number"]["value"] == "SB2002000027WK"
     assert "SB2002000027WK" in fields["unit_type_serial"]["value"]
-    assert fields["tube_serial_number"]["value"] == "0F1376"
-    assert "0F1376" in fields["tube_type_serial"]["value"]
+    assert fields["tube_serial_number"]["value"] == "20G225"
+    assert "20G225" in fields["tube_type_serial"]["value"]
     assert "E7894" in fields["tube_type_serial"]["value"]
     assert fields["tube_brand"]["value"] == "-"
 

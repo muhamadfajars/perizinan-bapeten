@@ -963,7 +963,7 @@ with st.sidebar:
                 for ct in chosen:
                     upload_map[ct].append(file)
             active_cat = sum(1 for v in upload_map.values() if v)
-            st.info(f"📋 {active_cat} dari 10 jenis dokumen terdeteksi.")
+            st.info(f"📋 {active_cat} dari {len(doc_keys)} jenis dokumen terdeteksi.")
     else:
         for doc_type, meta in DOCUMENT_TYPES.items():
             exts = ["pdf"] if meta["kind"] == "pdf" else ["jpg", "jpeg", "png", "bmp", "webp", "pdf"]
@@ -1524,9 +1524,9 @@ if active_run:
     # TAB 5: KELENGKAPAN DOKUMEN (CHECKLIST)
     # ─────────────────────────────────────────────────────────────
     with tab_checklist:
-        render_html("""
+        render_html(f"""
         <div style="margin-bottom:1rem;">
-            <h3 style="margin:0; font-size:1.15rem; font-weight:800;">📋 Checklist 10 Dokumen Wajib Permohonan</h3>
+            <h3 style="margin:0; font-size:1.15rem; font-weight:800;">📋 Checklist {len(DOCUMENT_TYPES)} Dokumen Persyaratan Permohonan</h3>
             <p style="margin:0.2rem 0 0 0; font-size:0.82rem; color:#94a3b8;">
                 Standar kelengkapan administrasi berkas izin pemanfaatan radiasi sesuai Peraturan BAPETEN.
             </p>

@@ -908,6 +908,16 @@ def cross_check_equipment(
             for doc in extractions.get(doc_type, []):
                 f = doc.get("fields", {})
                 file_name = doc.get("file_name", f"{doc_type}.pdf")
+                if doc_type == "persetujuan_import" and f.get("all_import_rows"):
+                    for cand in f["all_import_rows"]:
+                        c_sn = cand.get("unit_serial_number", "")
+                        if unit_serial and c_sn and (normalize_serial(unit_serial) == normalize_serial(c_sn) or normalize_serial(unit_serial) in normalize_serial(c_sn)):
+                            f["unit_serial_number"] = {"value": c_sn, "page": cand.get("page", 2), "method": "table_matched", "confidence": 1.0}
+                            if cand.get("unit_type"):
+                                f["unit_type"] = {"value": cand["unit_type"], "page": cand.get("page", 2), "method": "table_matched", "confidence": 1.0}
+                            if cand.get("unit_brand"):
+                                f["unit_brand"] = {"value": cand["unit_brand"], "page": cand.get("page", 2), "method": "table_matched", "confidence": 1.0}
+                            break
                 s_brand = str(f.get("unit_brand", {}).get("value") or "").strip()
                 s_type = str(f.get("unit_type", {}).get("value") or "").strip()
                 s_serial = str(f.get("unit_serial_number", {}).get("value") or "").strip()
@@ -929,11 +939,11 @@ def cross_check_equipment(
                     is_match = True
 
                 if is_match or len(equipment_list) == 1:
-                    if s_brand:
+                    if s_brand and s_brand not in ("-", "—"):
                         brand_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=s_brand, page=f.get("unit_brand", {}).get("page")))
-                    if s_type:
+                    if s_type and s_type not in ("-", "—"):
                         type_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=s_type, page=f.get("unit_type", {}).get("page") or f.get("unit_type_serial", {}).get("page")))
-                    if s_serial:
+                    if s_serial and s_serial not in ("-", "—"):
                         serial_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=s_serial, page=f.get("unit_serial_number", {}).get("page") or f.get("unit_type_serial", {}).get("page")))
 
         brand_check = evaluate_field_sources("unit_brand", "Merk unit", brand_sources, mode="brand")
@@ -1009,11 +1019,11 @@ def cross_check_tubes(
 
         # 1. Formulir sources
         if eq and eq.tube:
-            if t_brand:
+            if t_brand and t_brand not in ("-", "—"):
                 brand_sources.append(SourceEvidence(document_type="formulir", document_name="Formulir Permohonan", value=t_brand))
-            if t_type:
+            if t_type and t_type not in ("-", "—"):
                 type_sources.append(SourceEvidence(document_type="formulir", document_name="Formulir Permohonan", value=t_type))
-            if t_serial:
+            if t_serial and t_serial not in ("-", "—"):
                 serial_sources.append(SourceEvidence(document_type="formulir", document_name="Formulir Permohonan", value=t_serial))
 
         # 2. PPKR sources
@@ -1030,11 +1040,11 @@ def cross_check_tubes(
                         continue
                 if t_serial and p_serial and normalize_serial(t_serial) != normalize_serial(p_serial):
                     continue
-            if p_brand:
+            if p_brand and p_brand not in ("-", "—"):
                 brand_sources.append(SourceEvidence(document_type="ppkr", document_name=file_name, value=p_brand, page=f.get("tube_brand", {}).get("page")))
-            if p_type:
+            if p_type and p_type not in ("-", "—"):
                 type_sources.append(SourceEvidence(document_type="ppkr", document_name=file_name, value=p_type, page=f.get("tube_type", {}).get("page")))
-            if p_serial:
+            if p_serial and p_serial not in ("-", "—"):
                 serial_sources.append(SourceEvidence(document_type="ppkr", document_name=file_name, value=p_serial, page=f.get("tube_serial_number", {}).get("page")))
 
         # 3. Match with Tube Label images
@@ -1059,11 +1069,11 @@ def cross_check_tubes(
                 is_match = True
 
             if is_match:
-                if lt_brand:
+                if lt_brand and lt_brand not in ("-", "—"):
                     brand_sources.append(SourceEvidence(document_type="label_tabung", document_name=file_name, value=lt_brand, page=1))
-                if lt_type:
+                if lt_type and lt_type not in ("-", "—"):
                     type_sources.append(SourceEvidence(document_type="label_tabung", document_name=file_name, value=lt_type, page=1))
-                if lt_serial:
+                if lt_serial and lt_serial not in ("-", "—"):
                     serial_sources.append(SourceEvidence(document_type="label_tabung", document_name=file_name, value=lt_serial, page=1))
 
         # 4. Match with Uji Kesesuaian / Persetujuan Import / Paparan Radiasi / Uji Fungsi
@@ -1092,27 +1102,28 @@ def cross_check_tubes(
                 tb_s = str(f.get("tube_serial_number", {}).get("value") or "").strip()
                 if not tb_m and f.get("tube_type_serial", {}).get("value"):
                     raw_tts = str(f.get("tube_type_serial", {}).get("value")).strip()
-                    if "/" in raw_tts:
-                        parts = raw_tts.split("/", 1)
-                        tb_m = parts[0].strip()
-                        if not tb_s:
-                            tb_s = parts[1].strip()
-                    else:
-                        is_serial_like = bool(re.match(r"^[0-9]{2,}[A-Za-z]+[0-9]+$", raw_tts) or re.match(r"^[0-9A-Za-z]{6,}$", raw_tts))
-                        if not tb_s and is_serial_like:
-                            tb_s = raw_tts
-                        elif not is_serial_like and (not tb_s or raw_tts != tb_s):
-                            tb_m = raw_tts
+                    if raw_tts not in ("-", "—"):
+                        if "/" in raw_tts:
+                            parts = raw_tts.split("/", 1)
+                            tb_m = parts[0].strip()
+                            if not tb_s:
+                                tb_s = parts[1].strip()
+                        else:
+                            is_serial_like = bool(re.match(r"^[0-9]{2,}[A-Za-z]+[0-9]+$", raw_tts) or re.match(r"^[0-9A-Za-z]{6,}$", raw_tts))
+                            if not tb_s and is_serial_like:
+                                tb_s = raw_tts
+                            elif not is_serial_like and (not tb_s or raw_tts != tb_s):
+                                tb_m = raw_tts
 
                 if len(equipment_list) > 1 and not doc_unit_sn and t_serial and tb_s:
                     if normalize_serial(t_serial) != normalize_serial(tb_s):
                         continue
 
-                if tb_b:
+                if tb_b and tb_b not in ("-", "—"):
                     brand_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=tb_b, page=f.get("tube_brand", {}).get("page")))
-                if tb_m:
+                if tb_m and tb_m not in ("-", "—"):
                     type_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=tb_m, page=f.get("tube_type", {}).get("page") or f.get("tube_type_serial", {}).get("page") or f.get("tube_model", {}).get("page")))
-                if tb_s:
+                if tb_s and tb_s not in ("-", "—"):
                     serial_sources.append(SourceEvidence(document_type=doc_type, document_name=file_name, value=tb_s, page=f.get("tube_serial_number", {}).get("page") or f.get("tube_type_serial", {}).get("page")))
 
         tb_brand_chk = evaluate_field_sources("tube_brand", "Merk tabung", brand_sources, mode="brand")
@@ -1170,13 +1181,21 @@ def cross_check_tubes(
                     if normalize_serial(s.value) != normalize_serial(ref_val)
                 ]
                 if sec_discrepancies:
-                    tb_serial_chk.status = MatchingStatus.PERLU_REVIEW
-                    sec_doc_info = ", ".join(f"'{s.value}' ({s.document_type})" for s in sec_discrepancies)
-                    tb_serial_chk.reason = (
-                        f"Nomor seri insert sesuai bukti utama label fisik & uji kesesuaian ('{ref_val}'). "
-                        f"Terdeteksi nomor seri housing/dokumen sekunder {sec_doc_info}, perlu konfirmasi evaluator."
-                    )
-                    tb_serial_chk.score = max(tb_serial_chk.score or 0.0, 85.0)
+                    if all(s.document_type == "persetujuan_import" for s in sec_discrepancies):
+                        tb_serial_chk.status = MatchingStatus.SESUAI
+                        tb_serial_chk.score = 100.0
+                        tb_serial_chk.reason = (
+                            f"Nomor seri insert tabung sesuai bukti utama & dokumen operasional ('{ref_val}'). "
+                            f"Persetujuan import mencatat nomor seri housing unit ('{sec_discrepancies[0].value}')."
+                        )
+                    else:
+                        tb_serial_chk.status = MatchingStatus.PERLU_REVIEW
+                        sec_doc_info = ", ".join(f"'{s.value}' ({s.document_type})" for s in sec_discrepancies)
+                        tb_serial_chk.reason = (
+                            f"Nomor seri insert sesuai bukti utama label fisik & uji kesesuaian ('{ref_val}'). "
+                            f"Terdeteksi nomor seri housing/dokumen sekunder {sec_doc_info}, perlu konfirmasi evaluator."
+                        )
+                        tb_serial_chk.score = max(tb_serial_chk.score or 0.0, 85.0)
 
         tube_fields = {
             "tube_brand": tb_brand_chk,

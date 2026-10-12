@@ -73,8 +73,8 @@ def extract_facility_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
     }
 
     # Pass 1: Explicit labels with delimiter
-    for p_idx, page in enumerate(pages_text, start=1):
-        lines = [l.strip() for l in page.splitlines() if l.strip()]
+    for p_idx, page in enumerate(pages_text or [], start=1):
+        lines = [l.strip() for l in str(page or "").splitlines() if l.strip()]
         for idx, line in enumerate(lines):
             m = re.search(
                 r"^(?:Nama\s+)?(?:Rumah\s+Sakit|RS|Rumkit|Fasilitas|Faskes|Instansi|Institusi|Pemohon|Pelanggan|Customer)\s*[:=\-–]\s*([^\n\r]+)$",
@@ -89,8 +89,8 @@ def extract_facility_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
                     return val, p_idx
 
     # Pass 2: Header / Cover / Title / Kop Surat search on first 3 pages
-    for p_idx in range(min(3, len(pages_text))):
-        lines = [l.strip() for l in pages_text[p_idx].splitlines() if l.strip()]
+    for p_idx in range(min(3, len(pages_text or []))):
+        lines = [l.strip() for l in str(pages_text[p_idx] or "").splitlines() if l.strip()]
         for line in lines:
             if re.match(r"^(?:Direktur|Kepala|Wakil|Staff|Staf|Kebijakan|Pedoman|Integrasi|Sistem|Menimbang|Mengingat|Dasar|Untuk|Kepada)\b", line, re.IGNORECASE):
                 continue
@@ -104,8 +104,8 @@ def extract_facility_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
                     return cand, p_idx + 1
 
     # Pass 3: Recipient blocks (e.g. Kepada: ... RS ...)
-    for p_idx, page in enumerate(pages_text, start=1):
-        lines = [l.strip() for l in page.splitlines() if l.strip()]
+    for p_idx, page in enumerate(pages_text or [], start=1):
+        lines = [l.strip() for l in str(page or "").splitlines() if l.strip()]
         for idx, line in enumerate(lines):
             if re.search(r"^Kepada(?:\s+Yth\.?)?\b", line, re.IGNORECASE):
                 for next_line in lines[idx + 1: idx + 4]:
@@ -141,8 +141,8 @@ def extract_facility_address(pages_text: List[str]) -> Tuple[str, Optional[int]]
                     return val, p_idx
 
     # Look for Jl. or Jalan in first 3 pages
-    for p_idx in range(min(3, len(pages_text))):
-        lines = [l.strip() for l in pages_text[p_idx].splitlines() if l.strip()]
+    for p_idx in range(min(3, len(pages_text or []))):
+        lines = [l.strip() for l in str(pages_text[p_idx] or "").splitlines() if l.strip()]
         for line in lines:
             m = re.search(r"\b((?:Jl\.?|Jalan)\s*[^\r\n|]+)", line, re.I)
             if m:
@@ -187,8 +187,8 @@ def find_document_number(text: str) -> str:
 def extract_person_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
     """Extracts doctor, specialist, or officer name while avoiding table header strings."""
     # Pass 1: Look for doctor title patterns
-    for p_idx in range(min(3, len(pages_text))):
-        lines = [l.strip() for l in pages_text[p_idx].splitlines() if l.strip()]
+    for p_idx in range(min(3, len(pages_text or []))):
+        lines = [l.strip() for l in str(pages_text[p_idx] or "").splitlines() if l.strip()]
         for line in lines:
             m = re.search(
                 r"\b(dr\.?\s*[A-Za-z .,]+?(?:Sp\.[A-Za-z]+|M\.Kes|A\.Md\.[A-Za-z]+)?)(?:\s+(?:Kepala|Mayor|NIP|Jabatan)|$)",
@@ -201,8 +201,8 @@ def extract_person_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
                     return cand, p_idx + 1
 
     # Pass 2: Look for labeled person names, rejecting table headers
-    for p_idx in range(min(3, len(pages_text))):
-        lines = [l.strip() for l in pages_text[p_idx].splitlines() if l.strip()]
+    for p_idx in range(min(3, len(pages_text or []))):
+        lines = [l.strip() for l in str(pages_text[p_idx] or "").splitlines() if l.strip()]
         for idx, line in enumerate(lines):
             if re.search(r"^(?:No\.?|Nama)\s+(?:Jabatan|Tanda\s*Tangan|Tanggal|Keterangan)\b", line, re.IGNORECASE):
                 continue

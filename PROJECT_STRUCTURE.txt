@@ -1,32 +1,64 @@
 bapeten_document_matching_system/
-├── main.py                         # entry point CLI
-├── config.py                       # konfigurasi/path/threshold
-├── requirements.txt
-├── README.md
+├── app.py                         # Antarmuka web utama (Streamlit UI)
+├── config.py                      # Konfigurasi sistem, path direktori, threshold, & alias merk
+├── requirements.txt               # Daftar dependensi pustaka Python
+├── pytest.ini                     # Konfigurasi pengujian pytest
+├── README.md                      # Dokumentasi komprehensif sistem
+├── ARCHITECTURE.md                # Dokumentasi arsitektur sistem & diagram alur data
+├── CONFIG_CHECKLIST.md            # Checklist validasi parameter bisnis & evaluator BAPETEN
+├── PROJECT_STRUCTURE.txt          # Pemetaan struktur berkas proyek
 ├── .gitignore
-├── src/
-│   ├── pipeline.py                 # orkestrasi backend
-│   ├── ocr/
-│   │   ├── engine.py               # PaddleOCR
-│   │   └── preprocess.py           # OpenCV preprocessing
-│   ├── extraction/
-│   │   └── pdf_extractor.py        # Formulir + PPKR extraction
-│   ├── matching/
-│   │   └── label_matcher.py        # label parsing + fuzzy matching
-│   ├── validation/
-│   │   └── institution.py          # institusi + personil matching
-│   └── utils/
-│       └── text.py
+├── .streamlit/
+│   └── config.toml                # Konfigurasi tema dan server Streamlit
 ├── data/
 │   ├── input/
-│   │   ├── formulir/
-│   │   ├── label/
-│   │   └── ppkr/
-│   └── output/
-│       ├── preprocessed/
-│       ├── ocr/
-│       └── matching/
-├── notebooks/
-│   └── matching_formulir_vs_label_bapeten_colab.ipynb
-├── tests/
-└── logs/
+│   │   ├── documents/             # Arsip berkas PDF input
+│   │   └── labels/                # Citra berkas plat label fisik unit & tabung
+│   ├── output/
+│   │   ├── bapeten_matching.sqlite3 # Basis data riwayat evaluasi permohonan
+│   │   ├── results/               # Hasil evaluasi lengkap berformat JSON
+│   │   ├── crops/                 # Hasil potongan citra tanda tangan pejabat Sprint
+│   │   ├── preprocessed/          # Citra hasil pra-pemrosesan (binarisasi/enhancement)
+│   │   └── ocr/                   # Log dan output teks mentah OCR
+│   └── schemas/                   # JSON schemas validator permohonan & report
+├── src/
+│   ├── schema/                    # Definisi model data, entitas domain, & skema verifikasi
+│   │   ├── fields.py              # Definisi 15 berkas perizinan dan kamus field acuan
+│   │   ├── entities.py            # Pydantic Domain Entities (Facility, Equipment, Tubes, Personnel, PPR)
+│   │   ├── evidence.py            # Skema SourceEvidence dan pembuktian nomor halaman berkas fisik
+│   │   └── matching.py            # Skema CrossCheckReport, MatchingStatus, EntityCrossCheck, FieldCrossCheck
+│   ├── extraction/                # Modul parser dan ekstraksi dokumen hybrid
+│   │   ├── classifier.py          # Klasifikasi otomatis tipe berkas (Batch Upload)
+│   │   ├── document_parser.py     # Parser sentral seluruh dokumen PDF BAPETEN
+│   │   ├── form_parser.py         # Parser formulir permohonan dinamis multi-tabel
+│   │   ├── label_parser.py        # Parser OCR plat label fisik unit & tabung sinar-X
+│   │   ├── pdf_extractor.py       # Ekstraktor teks & tabel PDF hybrid (native digital + selektif OCR)
+│   │   ├── signature_cropper.py   # Deteksi dan crop tanda tangan dokumen Surat Perintah (Sprint)
+│   │   ├── generic_parser.py      # Ekstraksi field teks umum berbasis pola regex
+│   │   └── entity_builder.py      # Konsolidasi dictionary hasil ekstraksi ke Domain Entities
+│   ├── matching/                  # Mesin verifikasi silang (Cross-Check Engine)
+│   │   ├── normalizer.py          # Normalisasi teks, nomor seri, gelar profesi, dan hierarki alamat
+│   │   ├── fuzzy_matcher.py       # Fuzzy string matcher & evaluator kemiripan nilai
+│   │   └── cross_check_engine.py  # Engine verifikasi silang hierarkis & heuristik domain
+│   ├── ocr/                       # Modul pra-pemrosesan citra & OCR engine
+│   │   ├── preprocess.py          # Peningkatan kontras, rotasi, & binarisasi citra label
+│   │   └── engine.py              # Integrasi OCR (Tesseract / PaddleOCR)
+│   ├── validation/                # Mesin validasi kepatuhan perizinan BAPETEN
+│   │   └── rules.py               # Evaluasi kelengkapan dokumen wajib & aturan kepatuhan izin
+│   ├── storage/                   # Manajemen persistensi data
+│   │   └── database.py            # SQLite database adapter untuk riwayat run
+│   └── services/                  # Orkestrasi alur kerja (Workflow Orchestrator)
+│       └── run_service.py         # Pipeline pemrosesan berkas, ekstraksi, matching, & reporting
+└── tests/                         # Suite pengujian otomatis (80 test cases)
+    ├── test_api.py
+    ├── test_classifier.py
+    ├── test_cross_check_engine.py
+    ├── test_entity_schema.py
+    ├── test_extraction_engine.py
+    ├── test_label_pdf.py
+    ├── test_matching.py
+    ├── test_normalizer.py
+    ├── test_schema.py
+    ├── test_signature_cropper.py
+    ├── test_validation.py
+    └── test_validation_rules.py

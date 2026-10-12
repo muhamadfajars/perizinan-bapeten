@@ -1,5 +1,6 @@
 from pathlib import Path
 from uuid import uuid4
+from datetime import datetime
 import json
 
 from config import PREPROCESSED_DIR, OCR_DIR, RESULT_DIR, DOCUMENT_TYPES, DOCUMENT_FIELDS
@@ -29,7 +30,7 @@ NO_OCR_DOCS = {
 }
 
 
-def _process_pdf(doc_type, path):
+def _process_pdf(doc_type, path, context=None):
     need_tables = doc_type in {"formulir", "ppkr", "persetujuan_import", "uji_kesesuaian", "uji_fungsi"}
     max_pages = DOC_PAGE_LIMITS.get(doc_type)
     ocr_enabled = doc_type not in NO_OCR_DOCS
@@ -57,7 +58,7 @@ def _process_pdf(doc_type, path):
                     actual_doc_type = dt
                     break
 
-    parsed = parse_document(actual_doc_type, extracted["pages_text"], extracted["tables"])
+    parsed = parse_document(actual_doc_type, extracted["pages_text"], extracted["tables"], context=context)
     parsed["document_type"] = actual_doc_type
     parsed["file_name"] = Path(path).name
     parsed["file_path"] = str(path)
@@ -213,8 +214,26 @@ def execute_run(document_inputs, on_progress=None):
     # Calculate total files
     total_files = sum(len(paths) for paths in document_inputs.values() if paths)
     processed_count = 0
+    running_context = {}
 
-    for doc_type, paths in document_inputs.items():
+    DOC_PRIORITY = {
+        "formulir": 0,
+        "ppkr": 1,
+        "label_unit": 2,
+        "label_tabung": 3,
+        "uji_kesesuaian": 4,
+        "paparan_radiasi": 5,
+        "uji_fungsi": 6,
+        "persetujuan_import": 7,
+    }
+
+    sorted_doc_types = sorted(
+        document_inputs.keys(),
+        key=lambda dt: DOC_PRIORITY.get(dt, 50)
+    )
+
+    for doc_type in sorted_doc_types:
+        paths = document_inputs[doc_type]
         if doc_type not in DOCUMENT_TYPES:
             continue
         for path in paths or []:
@@ -225,11 +244,18 @@ def execute_run(document_inputs, on_progress=None):
             if DOCUMENT_TYPES[doc_type]["kind"] == "image":
                 result = _process_label(doc_type, path, run_id)
             else:
-                result = _process_pdf(doc_type, path)
+                result = _process_pdf(doc_type, path, context=running_context)
             target_bucket = result.get("document_type") or doc_type
             if target_bucket not in extractions:
                 extractions[target_bucket] = []
             extractions[target_bucket].append(result)
+
+            # Update running context with extracted hospital/serial info
+            f_fields = result.get("fields", {})
+            for key in ["hospital_name", "hospital_address", "unit_serial_number", "unit_brand", "unit_type"]:
+                val = f_fields.get(key, {}).get("value")
+                if val and val not in ("-", "—") and key not in running_context:
+                    running_context[key] = val
 
     checks = cross_check(extractions)
     validate_cross_checks(checks)
@@ -240,6 +266,7 @@ def execute_run(document_inputs, on_progress=None):
 
     result = {
         "run_id": run_id,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
         "application": application.model_dump(mode="json"),
         "cross_check_report": report.model_dump(mode="json"),
         "compliance": compliance.model_dump(mode="json"),

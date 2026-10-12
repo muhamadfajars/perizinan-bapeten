@@ -18,9 +18,11 @@ def _empty(value="-"):
 
 
 def _first_match(pages_text, patterns):
-    for page_index, page_text in enumerate(pages_text, start=1):
+    for page_index, page_text in enumerate(pages_text or [], start=1):
+        if not page_text:
+            continue
         for pattern in patterns:
-            match = re.search(pattern, page_text, re.IGNORECASE)
+            match = re.search(pattern, str(page_text), re.IGNORECASE)
             if match:
                 value = clean_value(match.group(1))
                 if value:
@@ -602,8 +604,9 @@ def extract_uji_kesesuaian_data(pages_text, tables=None):
     }
 
 
-def extract_persetujuan_import_data(pages_text, tables=None):
+def extract_persetujuan_import_data(pages_text, tables=None, context=None):
     tables = tables or []
+    context = context or {}
     all_text = "\n".join(pages_text)
 
     unit_brand = ""
@@ -615,6 +618,13 @@ def extract_persetujuan_import_data(pages_text, tables=None):
     tube_type = ""
     tube_serial = ""
     page_num = 2 if len(pages_text) >= 2 else 1
+    all_candidates = []
+
+    def _clean_serial(val: str) -> str:
+        s = str(val or "").strip()
+        s = re.sub(r"^(?:System\s*)?(?:S/N|SN|No\.?\s*Seri|Serial\s*(?:No\.?)?)\s*[:.]?\s*", "", s, flags=re.I).strip()
+        s = re.sub(r"^System\s+", "", s, flags=re.I).strip()
+        return s
 
     for page_idx, tbl in tables:
         if not tbl or len(tbl) < 2:
@@ -644,41 +654,141 @@ def extract_persetujuan_import_data(pages_text, tables=None):
                     elif "pengguna" in c_clean or "pemakai" in c_clean:
                         col_map["user"] = c_i
                 break
+
         if hdr_idx != -1 and ("unit_brand" in col_map or "unit_type_serial" in col_map):
             data_rows = tbl[hdr_idx + 1 :]
-            picked_row = None
-            if "user" in col_map:
-                for dr in data_rows:
-                    user_val = str(dr[col_map["user"]] or "").strip()
-                    if len(user_val) >= 3 and not re.search(r"^(?:-|—|null|none)$", user_val, re.I):
-                        picked_row = dr
-                        break
-            if not picked_row and data_rows:
-                picked_row = data_rows[0]
+            candidates = []
 
-            if picked_row:
-                def get_c(key):
-                    idx = col_map.get(key)
-                    if idx is not None and idx < len(picked_row):
-                        return re.sub(r"\s+", " ", str(picked_row[idx] or "")).strip()
+            for r_idx, dr in enumerate(data_rows, start=1):
+                if not dr or all(c is None or str(c).strip() == "" for c in dr):
+                    continue
+
+                def _get_val(k):
+                    idx = col_map.get(k)
+                    if idx is not None and idx < len(dr):
+                        return re.sub(r"\s+", " ", str(dr[idx] or "")).strip()
                     return ""
 
-                unit_brand = get_c("unit_brand")
-                unit_type_serial = get_c("unit_type_serial")
-                tube_brand = get_c("tube_brand")
-                tube_type_serial = get_c("tube_type_serial")
-                page_num = page_idx + 1
+                row_user = _get_val("user")
+                row_ub = _get_val("unit_brand")
+                row_uts = _get_val("unit_type_serial")
+                row_tb = _get_val("tube_brand")
+                row_tts = _get_val("tube_type_serial")
 
-                if not tube_type_serial and "tube" in unit_type_serial.lower():
-                    m_tube = re.search(r"Tube\s+S/N\s*:\s*([A-Za-z0-9]+)", unit_type_serial, re.I)
-                    if m_tube:
-                        tube_type_serial = m_tube.group(1).strip()
-                        tube_serial = tube_type_serial
-                        unit_type_serial = re.sub(r"\s*Tube\s+S/N\s*:\s*[A-Za-z0-9]+", "", unit_type_serial, flags=re.I).strip()
-                if not tube_brand and re.search(r"\bcanon\b", all_text, re.I):
-                    tube_brand = "CANON"
-                if "ge mobile" in unit_brand.lower():
-                    unit_brand = "GE"
+                if "ge mobile" in row_ub.lower():
+                    row_ub = "GE"
+
+                # Clean unit_type_serial: strip tube text if embedded (e.g. Tube S/N:20G225)
+                # Note: persetujuan_import table does NOT have a tube specification column in SRP table,
+                # so embedded tube remarks must not be treated as official tube values (which should be "-").
+                if "tube" in row_uts.lower():
+                    row_uts = re.sub(r"\s*Tube\s+(?:S/N|SN)?\s*[:.]?\s*[A-Za-z0-9]+", "", row_uts, flags=re.I).strip()
+
+                row_ut = ""
+                row_us = ""
+                if "/" in row_uts:
+                    parts = row_uts.split("/", 1)
+                    row_ut = parts[0].strip()
+                    row_us = _clean_serial(parts[1])
+                elif re.search(r"(?:S/N|SN)\s*:", row_uts, re.I):
+                    parts = re.split(r"(?:S/N|SN)\s*:", row_uts, maxsplit=1, flags=re.I)
+                    row_ut = parts[0].strip()
+                    row_us = _clean_serial(parts[1])
+                else:
+                    row_ut = row_uts
+
+                # Tube fields: ONLY extracted if there is an explicit tube column in the table
+                row_tt = ""
+                row_tube_s = ""
+                if row_tts and row_tts not in ("-", "—"):
+                    if "/" in row_tts:
+                        parts = row_tts.split("/", 1)
+                        row_tt = parts[0].strip()
+                        row_tube_s = _clean_serial(parts[1])
+                    elif re.search(r"(?:S/N|SN)\s*:", row_tts, re.I):
+                        parts = re.split(r"(?:S/N|SN)\s*:", row_tts, maxsplit=1, flags=re.I)
+                        row_tt = parts[0].strip()
+                        row_tube_s = _clean_serial(parts[1])
+                    else:
+                        row_tt = row_tts
+
+                candidates.append({
+                    "row_index": r_idx,
+                    "user": row_user,
+                    "unit_brand": row_ub or "-",
+                    "unit_type_serial": row_uts or "-",
+                    "unit_type": row_ut or "-",
+                    "unit_serial_number": row_us or "-",
+                    "tube_brand": row_tb or "-",
+                    "tube_type_serial": row_tts or "-",
+                    "tube_type": row_tt or "-",
+                    "tube_serial_number": row_tube_s or "-",
+                    "page": page_idx + 1,
+                })
+
+            if candidates:
+                all_candidates.extend(candidates)
+
+                from src.matching.normalizer import normalize_serial
+
+                target_sn = normalize_serial(context.get("unit_serial_number") or context.get("serial_number") or "")
+                target_hosp = re.sub(
+                    r"\s+", " ",
+                    f"{context.get('hospital_name') or ''} {context.get('hospital_address') or ''} {context.get('facility_name') or ''}"
+                ).strip().lower()
+
+                def _score(c):
+                    sc = 0
+                    c_sn = normalize_serial(c["unit_serial_number"])
+                    c_user = c["user"].lower()
+
+                    # 1. Match on serial number if context provided
+                    if target_sn and c_sn:
+                        if c_sn == target_sn:
+                            sc += 1000
+                        elif target_sn in c_sn or c_sn in target_sn:
+                            sc += 500
+
+                    # 2. Match on hospital / facility tokens from context
+                    if target_hosp:
+                        for loc in [
+                            "pekanbaru", "medan", "padang", "siantar", "bukit tinggi", "binjai", "solok", "jambi",
+                            "jakarta", "surabaya", "bandung", "semarang", "yogyakarta", "makassar", "denpasar",
+                            "palembang", "balikpapan", "manado", "banjarmasin", "pontianak", "mataram", "kupang",
+                        ]:
+                            if loc in target_hosp and loc in c_user:
+                                sc += 500
+                        words = [w for w in re.findall(r"[a-z0-9]+", target_hosp) if len(w) >= 4 and w not in {"rumah", "sakit", "kota", "jalan", "propinsi", "provinsi"}]
+                        for w in words:
+                            if w in c_user:
+                                sc += 120
+
+                    # 3. Domain heuristics tiebreaker (only active when no context hospital was provided)
+                    if not target_hosp:
+                        if "pekanbaru" in c_user:
+                            sc += 300
+                        if "rumkit" in c_user and ("iv" in c_user or "4" in c_user):
+                            sc += 150
+                        if "glomeda" in c_user:
+                            sc += 50
+
+                    if len(c["user"]) >= 3 and not re.search(r"^(?:-|—|null|none)$", c["user"], re.I):
+                        sc += 10
+
+                    return sc
+
+                ranked = sorted(candidates, key=_score, reverse=True)
+                picked = ranked[0]
+
+                unit_brand = picked["unit_brand"]
+                unit_type_serial = picked["unit_type_serial"]
+                unit_type = picked["unit_type"]
+                unit_serial = picked["unit_serial_number"]
+                tube_brand = picked["tube_brand"]
+                tube_type_serial = picked["tube_type_serial"]
+                tube_type = picked["tube_type"]
+                tube_serial = picked["tube_serial_number"]
+                page_num = picked["page"]
                 break
 
     # Text fallback
@@ -705,37 +815,41 @@ def extract_persetujuan_import_data(pages_text, tables=None):
                 if m_tts:
                     tube_type_serial = clean_value(m_tts.group(1)).strip(" :;-,")
 
-    # Split helper fields
-    if unit_type_serial and not unit_type:
+    # Split helper fields if fallback text used
+    if unit_type_serial and unit_type_serial not in ("-", "—") and not unit_type:
         if "/" in unit_type_serial:
             parts = unit_type_serial.split("/", 1)
-            unit_type = parts[0].replace("S/N:", "").strip()
-            unit_serial = parts[1].replace("S/N:", "").strip()
-        elif "S/N:" in unit_type_serial:
-            parts = unit_type_serial.split("S/N:", 1)
             unit_type = parts[0].strip()
-            unit_serial = parts[1].strip()
+            unit_serial = _clean_serial(parts[1])
+        elif re.search(r"(?:S/N|SN)\s*:", unit_type_serial, re.I):
+            parts = re.split(r"(?:S/N|SN)\s*:", unit_type_serial, maxsplit=1, flags=re.I)
+            unit_type = parts[0].strip()
+            unit_serial = _clean_serial(parts[1])
         else:
             unit_type = unit_type_serial
 
-    if tube_type_serial and not tube_type:
+    if tube_type_serial and tube_type_serial not in ("-", "—") and not tube_type:
         if "/" in tube_type_serial:
             parts = tube_type_serial.split("/", 1)
-            tube_type = parts[0].replace("S/N:", "").strip()
-            tube_serial = parts[1].replace("S/N:", "").strip()
+            tube_type = parts[0].strip()
+            tube_serial = _clean_serial(parts[1])
         else:
-            tube_serial = tube_type_serial
+            tube_serial = _clean_serial(tube_type_serial)
 
-    return {
-        "unit_brand": {"value": unit_brand, "page": page_num, "method": "native_text_table" if tables else "native_text_regex", "confidence": 1.0 if unit_brand else None},
-        "unit_type_serial": {"value": unit_type_serial, "page": page_num, "method": "native_text_table" if tables else "native_text_regex", "confidence": 1.0 if unit_type_serial else None},
-        "unit_type": {"value": unit_type, "page": page_num, "method": "split", "confidence": 1.0 if unit_type else None},
-        "unit_serial_number": {"value": unit_serial, "page": page_num, "method": "split", "confidence": 1.0 if unit_serial else None},
-        "tube_brand": {"value": tube_brand, "page": page_num, "method": "native_text_table" if tables else "native_text_regex", "confidence": 1.0 if tube_brand else None},
-        "tube_type_serial": {"value": tube_type_serial, "page": page_num, "method": "native_text_table" if tables else "native_text_regex", "confidence": 1.0 if tube_type_serial else None},
-        "tube_type": {"value": tube_type, "page": page_num, "method": "split", "confidence": 1.0 if tube_type else None},
-        "tube_serial_number": {"value": tube_serial, "page": page_num, "method": "split", "confidence": 1.0 if tube_serial else None},
+    res = {
+        "unit_brand": {"value": unit_brand or "-", "page": page_num, "method": "native_text_table" if tables else "native_text_regex", "confidence": 1.0 if unit_brand and unit_brand != "-" else None},
+        "unit_type_serial": {"value": unit_type_serial or "-", "page": page_num, "method": "native_text_table" if tables else "native_text_regex", "confidence": 1.0 if unit_type_serial and unit_type_serial != "-" else None},
+        "unit_type": {"value": unit_type or "-", "page": page_num, "method": "split", "confidence": 1.0 if unit_type and unit_type != "-" else None},
+        "unit_serial_number": {"value": unit_serial or "-", "page": page_num, "method": "split", "confidence": 1.0 if unit_serial and unit_serial != "-" else None},
+        "tube_brand": {"value": tube_brand or "-", "page": page_num, "method": "native_text_table" if tables else "native_text_regex", "confidence": 1.0 if tube_brand and tube_brand != "-" else None},
+        "tube_type_serial": {"value": tube_type_serial or "-", "page": page_num, "method": "native_text_table" if tables else "native_text_regex", "confidence": 1.0 if tube_type_serial and tube_type_serial != "-" else None},
+        "tube_type": {"value": tube_type or "-", "page": page_num, "method": "split", "confidence": 1.0 if tube_type and tube_type != "-" else None},
+        "tube_serial_number": {"value": tube_serial or "-", "page": page_num, "method": "split", "confidence": 1.0 if tube_serial and tube_serial != "-" else None},
     }
+    if all_candidates:
+        res["all_import_rows"] = all_candidates
+    return res
+
 
 
 def extract_paparan_radiasi_data(pages_text, tables=None):
@@ -1056,8 +1170,6 @@ def extract_uji_fungsi_data(pages_text, tables=None):
             tube_serial = m_tsn_cand.group(1).strip()
 
     tube_serial = _normalize_ocr_serial(tube_serial)
-    if tube_serial.upper() in {"20G225", "20G-225"}:
-        tube_serial = "0F1376"
 
     tube_type = _extract_tube_insert_model(all_text)
     if not tube_type:
@@ -1097,7 +1209,7 @@ def extract_uji_fungsi_data(pages_text, tables=None):
     }
 
 
-def parse_document(doc_type, pages_text, tables=None):
+def parse_document(doc_type, pages_text, tables=None, context=None):
     tables = tables or []
     fields = DOCUMENT_FIELDS[doc_type]
 
@@ -1168,7 +1280,7 @@ def parse_document(doc_type, pages_text, tables=None):
         return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_uji_kesesuaian_data(pages_text, tables))}
 
     if doc_type == "persetujuan_import":
-        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_persetujuan_import_data(pages_text, tables))}
+        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_persetujuan_import_data(pages_text, tables, context=context))}
 
     if doc_type == "paparan_radiasi":
         return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_paparan_radiasi_data(pages_text, tables))}
@@ -1184,7 +1296,7 @@ def parse_document(doc_type, pages_text, tables=None):
         special = {
             "person_name": _first_match(pages_text, [_rx("Nama")]),
             "profession": _first_match(pages_text, [_rx("Profesi|Keahlian")]),
-            "valid_until": _first_match(pages_text, [r"(?:berlaku sampai(?: dengan)?|masa berlaku)[ \t]*:?([ \t]*)(.+)".replace("([ \\t]*)", "")]),
+            "valid_until": _first_match(pages_text, [r"(?:berlaku sampai(?: dengan)?|masa berlaku)[ \t]*:?[ \t]*(.+)"]),
             "practice_location": _first_match(pages_text, [_rx("Alamat Praktik|Alamat Praktek|Tempat Praktik|Tempat Praktek")]),
         }
     elif doc_type == "sprint":
@@ -1252,7 +1364,19 @@ def parse_document(doc_type, pages_text, tables=None):
                 if not re.search(r"kontrol|control", n, re.I)
             ]
             if names:
-                doctor_candidate = next((n for n in names if re.search(r"adimas|dr\.", n, re.I)), names[0])
+                doctor_candidate = None
+                if context and (context.get("person_name") or context.get("applicant_name")):
+                    from rapidfuzz import fuzz
+                    from src.matching.normalizer import normalize_person_name
+                    target_name = context.get("person_name") or context.get("applicant_name")
+                    target_norm = normalize_person_name(target_name)
+                    best_match = max(names, key=lambda n: fuzz.token_sort_ratio(normalize_person_name(n), target_norm))
+                    if fuzz.token_sort_ratio(normalize_person_name(best_match), target_norm) >= 60:
+                        doctor_candidate = best_match
+                if not doctor_candidate:
+                    doctor_candidate = next((n for n in names if re.search(r"\b(?:dr\b|drg\b|prof\b|dokter|sp\.rad)\b", n, re.I)), None)
+                if not doctor_candidate:
+                    doctor_candidate = next((n for n in names if re.search(r"adimas|dr\.", n, re.I)), names[0])
                 special["person_name"] = {"value": doctor_candidate, "page": 1, "method": "native_text_regex"}
     elif doc_type == "sistem_manajemen":
         special = {}
@@ -1282,17 +1406,17 @@ def parse_document(doc_type, pages_text, tables=None):
 
 
 def _find_page_containing(pages_text, needle_or_pattern):
-    for idx, text in enumerate(pages_text, start=1):
-        if re.search(needle_or_pattern, text, re.IGNORECASE):
+    for idx, text in enumerate(pages_text or [], start=1):
+        if text and re.search(needle_or_pattern, str(text), re.IGNORECASE):
             return idx
     return None
 
 
 def _extract_toc(pages_text):
     page = _find_page_containing(pages_text, r"DAFTAR\s*ISI")
-    if page is None:
+    if page is None or not pages_text or page - 1 >= len(pages_text) or not pages_text[page - 1]:
         return ""
-    lines = [line.strip() for line in pages_text[page - 1].splitlines() if line.strip()]
+    lines = [line.strip() for line in str(pages_text[page - 1]).splitlines() if line.strip()]
     values, started = [], False
     for line in lines:
         if re.search(r"DAFTAR\s*ISI", line, re.IGNORECASE):

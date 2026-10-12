@@ -15,7 +15,9 @@ def normalize(value):
 
 def normalize_serial(value):
     # Conservative OCR normalization used only for serial-like fields.
-    return normalize(value).replace("O", "0").replace("I", "1")
+    s = str(value or "").strip()
+    s = re.sub(r"^(?:System|S/N|SN|No\.?\s*Seri)\s*[:.]?\s*", "", s, flags=re.I).strip()
+    return normalize(s).replace("O", "0").replace("I", "1")
 
 
 def normalize_date(text):

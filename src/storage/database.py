@@ -31,11 +31,13 @@ class Database:
 
     def save_run_generic(self, result):
         with self.connect() as conn:
+            created_at_val = result.get("created_at") or datetime.now().isoformat(timespec="seconds")
+            result["created_at"] = created_at_val
             conn.execute(
                 "INSERT INTO runs (run_id, created_at, file_count, result_json) VALUES (?, ?, ?, ?)",
                 (
                     result["run_id"],
-                    datetime.now().isoformat(timespec="seconds"),
+                    created_at_val,
                     sum(len(v) for v in result.get("documents", {}).values()),
                     json.dumps(result, ensure_ascii=False, default=str),
                 ),
@@ -50,5 +52,10 @@ class Database:
 
     def get_run(self, run_id):
         with self.connect() as conn:
-            row = conn.execute("SELECT result_json FROM runs WHERE run_id = ?", (run_id,)).fetchone()
-        return json.loads(row[0]) if row else None
+            row = conn.execute("SELECT created_at, result_json FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        if not row:
+            return None
+        data = json.loads(row[1])
+        if "created_at" not in data or not data["created_at"]:
+            data["created_at"] = row[0]
+        return data

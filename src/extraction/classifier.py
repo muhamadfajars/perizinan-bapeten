@@ -28,8 +28,6 @@ FILENAME_PATTERNS = [
     (r"\b(?:label[\s_]+unit|foto[\s_]+unit|plat[\s_]+unit|unit[\s_]+label|unit[\s_]+plate|foto[\s_]+keseluruhan|generator|xray[\s_]+unit|pesawat[\s_]+sinar|unit[\s_]+pesawat|control[\s_]+panel)\b", "label_unit"),
     (r"\b(?:tabung|tube)\b", "label_tabung"),
     (r"\b(?:unit|pesawat)\b", "label_unit"),
-    (r"\b(?:ijazah)\b", "ijazah"),
-    (r"\b(?:ktp)\b", "ktp"),
     (r"\b(?:perawatan|pemeliharaan|maintenance)\b", "program_perawatan"),
     (r"\b(?:manajemen)\b", "sistem_manajemen"),
     (r"\b(?:permohonan)\b", "formulir"),

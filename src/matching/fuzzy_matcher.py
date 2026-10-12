@@ -3,7 +3,13 @@ from collections import defaultdict
 from rapidfuzz import fuzz
 
 from config import BRAND_ALIASES, BRAND_FULL_NAMES, MATCH_THRESHOLD, REVIEW_THRESHOLD, BRAND_FUZZY_THRESHOLD, ADDRESS_MATCH_THRESHOLD
-from src.matching.normalizer import normalize, normalize_serial, normalize_address, normalize_facility_name
+from src.matching.normalizer import (
+    normalize,
+    normalize_serial,
+    normalize_address,
+    normalize_facility_name,
+    normalize_person_name,
+)
 from src.schema.fields import CROSS_CHECK_RULES
 
 STATUS_OK = "SESUAI"
@@ -55,13 +61,25 @@ def compare_values(left, right, mode="fuzzy_text"):
             return score, STATUS_REVIEW
         return score, STATUS_MISMATCH
 
-    if mode in ("facility_name", "fuzzy_name"):
+    if mode == "facility_name":
         l_fac = normalize_facility_name(left)
         r_fac = normalize_facility_name(right)
         if l_fac == r_fac:
             return 100.0, STATUS_OK
         score = max(fuzz.token_sort_ratio(l_fac, r_fac), fuzz.token_set_ratio(l_fac, r_fac))
         if fuzz.token_set_ratio(l_fac, r_fac) >= 80.0 or score >= MATCH_THRESHOLD:
+            return score, STATUS_OK
+        if score >= REVIEW_THRESHOLD:
+            return score, STATUS_REVIEW
+        return score, STATUS_MISMATCH
+
+    if mode == "fuzzy_name":
+        l_name = normalize_person_name(left)
+        r_name = normalize_person_name(right)
+        if l_name == r_name:
+            return 100.0, STATUS_OK
+        score = fuzz.token_sort_ratio(l_name, r_name)
+        if score >= MATCH_THRESHOLD:
             return score, STATUS_OK
         if score >= REVIEW_THRESHOLD:
             return score, STATUS_REVIEW
