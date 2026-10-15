@@ -20,6 +20,7 @@ DOC_PAGE_LIMITS = {
     "sistem_manajemen": 12,
     "program_perawatan": 18,
     "ppkr": 20,
+    "gedung_penahan_radiasi": 20,
 }
 
 # Digital documents that strictly do not use OCR (extracted purely via native digital PDF text/tables)
@@ -27,11 +28,12 @@ NO_OCR_DOCS = {
     "sistem_manajemen",
     "program_perawatan",
     "ppkr",
+    "gedung_penahan_radiasi",
 }
 
 
 def _process_pdf(doc_type, path, context=None):
-    need_tables = doc_type in {"formulir", "ppkr", "persetujuan_import", "uji_kesesuaian", "uji_fungsi"}
+    need_tables = doc_type in {"formulir", "ppkr", "persetujuan_import", "uji_kesesuaian", "uji_fungsi", "laporan_dosis_awal"}
     max_pages = DOC_PAGE_LIMITS.get(doc_type)
     ocr_enabled = doc_type not in NO_OCR_DOCS
     max_ocr = 3 if doc_type in {"sib", "sip", "sprint", "tld", "paparan_radiasi", "uji_fungsi", "formulir"} else 1

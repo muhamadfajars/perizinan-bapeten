@@ -871,32 +871,45 @@ def extract_paparan_radiasi_data(pages_text, tables=None):
 
     # 2. hospital_address
     hospital_address = ""
-    cust_block = re.split(r"\b(?:Data\s+Pengalih|Data\s+Alat|Data\s+Pesawat)\b", all_text, flags=re.I)[0]
+    # Strip letterhead / kop surat before document title if document title is present
+    m_title = re.search(r"\b(?:PENGUKURAN\s+PAPARAN|LAPORAN\s+HASIL|BERITA\s+ACARA\s+PENGUKURAN)\b", all_text, re.I)
+    body_text = all_text[m_title.start():] if m_title else all_text
 
-    # Check for direct Jl./Jalan pattern in the customer block first
-    m_cust_jl = re.search(r"\b(J[IlL1]\.?[ \t]+[^\r\n|]+)", cust_block, re.I)
-    if m_cust_jl:
-        cand_addr = clean_value(m_cust_jl.group(1)).strip(" :;-,")
-        cand_addr = re.sub(r"\s+(?:2\s+Alamat|Nama\s+Pendamping|Data\s+Pengalih|Data\s+Alat).*$", "", cand_addr, flags=re.I).strip(" :;-,")
-        if len(cand_addr) >= 8:
-            hospital_address = cand_addr
+    # Isolate customer/instansi block (before equipment / importir / instalatir / pengalih sections)
+    cust_block = re.split(r"\b(?:II\.|III\.|Data\s+Pengalih|Importir|Instalatir|Data\s+Alat|Data\s+Pesawat)\b", body_text, flags=re.I)[0]
 
+    # Priority A: Section-based explicit 'Alamat' in DATA INSTANSI / DATA PELANGGAN
+    m_inst_addr = re.search(
+        r"(?:DATA\s+INSTANSI|DATA\s+PELANGGAN|DATA\s+FASILITAS)[\s\S]+?(?:2\.\s*)?Alamat(?:\s+Instansi|\s+Fasilitas|\s+Rumah\s+Sakit)?\s*[:=\-–]?\s*([\s\S]+?)(?=\n\s*(?:[0-9]+\.\s*[A-Z]|Nama\s+Ruangan|Penanggung|Petugas|Personal|Telp|Email|II\.|DATA\s+PESAWAT|DATA\s+ALAT)|$)",
+        cust_block,
+        re.I,
+    )
+    if m_inst_addr:
+        cand = re.sub(r"\s+", " ", m_inst_addr.group(1)).strip(" :;-,")
+        if not re.search(r"\b(?:Nama\s+Pendamping|Pendamping|Jabatan|Radiographer|Pengalih|Data\s+Alat)\b", cand, re.I) and len(cand) >= 8:
+            hospital_address = cand
+
+    # Priority B: Explicit labeled 'Alamat' in customer block
     if not hospital_address:
         m_addr = re.search(
-            r"(?:Alamat(?:\s+Rumah\s+Sakit|\s+Pelanggan)?|Address)\s*[:=\-–]?\s*([^\n\r]+)",
+            r"(?:Alamat(?:\s+Rumah\s+Sakit|\s+Pelanggan|\s+Instansi)?|Address)\s*[:=\-–]\s*([^\n\r]+)",
             cust_block,
             re.I,
         )
         if m_addr:
-            cand_addr = clean_value(m_addr.group(1)).strip(" :;-,")
-            if not re.search(r"\b(?:Nama\s+Pendamping|Pendamping|Jabatan|Radiographer|Pengalih|Data\s+Alat)\b", cand_addr, re.I):
-                if len(cand_addr) >= 8:
-                    hospital_address = cand_addr
+            cand = clean_value(m_addr.group(1)).strip(" :;-,")
+            if not re.search(r"\b(?:Nama\s+Pendamping|Pendamping|Jabatan|Radiographer|Pengalih|Data\s+Alat)\b", cand, re.I):
+                if len(cand) >= 8:
+                    hospital_address = cand
 
+    # Priority C: Direct street address pattern inside customer block (NOT letterhead)
     if not hospital_address:
-        m_jl = re.search(r"\b(J[IlL1]\.?[ \t]+[^\r\n|]+)", all_text, re.I)
-        if m_jl:
-            hospital_address = clean_value(m_jl.group(1)).strip(" :;-,")
+        m_cust_jl = re.search(r"\b(J[IlL1]\.?[ \t]+[^\r\n|]+)", cust_block, re.I)
+        if m_cust_jl:
+            cand = clean_value(m_cust_jl.group(1)).strip(" :;-,")
+            cand = re.sub(r"\s+(?:2\s+Alamat|Nama\s+Pendamping|Data\s+Pengalih|Data\s+Alat).*$", "", cand, flags=re.I).strip(" :;-,")
+            if len(cand) >= 8:
+                hospital_address = cand
 
     if not hospital_address:
         fac_addr, _ = extract_facility_address(pages_text)
@@ -906,24 +919,44 @@ def extract_paparan_radiasi_data(pages_text, tables=None):
     if hospital_address.startswith("JI."):
         hospital_address = "Jl." + hospital_address[3:]
 
-    # 3. Unit model & serial
-    m_model = re.search(r"\b(OPTIMA[ \t]+XR[0-9A-Z]+(?:\s+[A-Z0-9]+)?|SOMATOM[ \t]+[^\n\r]+|Azurion[ \t]+[^\n\r]+)\b", all_text, re.I)
-    if not m_model:
-        m_model = re.search(r"(?:Model Alat|Jenis Alat)\s*[:=\-–]?\s*([^\n\r]+)", all_text, re.I)
-    unit_type = clean_value(m_model.group(1)).strip(" :;-,") if m_model else ""
+    # 3. Equipment Section (isolate equipment block if possible)
+    eq_match = re.search(r"\b(?:DATA\s+PESAWAT|DATA\s+ALAT)\b[\s\S]+?(?=(?:III\.|IV\.|IMPORTIR|DATA\s+PENGALIH|DATA\s+ALAT\s+UKUR|$))", body_text, re.I)
+    eq_text = eq_match.group(0) if eq_match else body_text
 
-    m_serial = re.search(r"\b(SB[0-9]{5,}[A-Z0-9]*)\b", all_text, re.I)
-    if not m_serial:
-        m_serial = re.search(r"(?:No Seri Alat|No\.?\s*Seri Alat)\s*[:=\-–]?\s*([A-Za-z0-9\-_]+)", all_text, re.I)
-    unit_serial = clean_value(m_serial.group(1)).strip(" :;-,") if m_serial else ""
+    # Unit type & serial
+    m_model_line = re.search(r"(?:Tipe(?:\s+Alat|\s+Pesawat|\s+Unit)?|Model(?:\s+Alat|\s+Unit)?|Jenis\s+Alat)\s*[:=\-–]\s*([^\n\r]+)", eq_text, re.I)
+    unit_serial = ""
+    unit_type = ""
+    if m_model_line:
+        line_val = clean_value(m_model_line.group(1)).strip(" :;-,")
+        m_split_sn = re.split(r"\s+(?:S/?N|Serial(?:\s+No|\s+Number)?|No\.?\s*Seri)\s*[:=\-–]?\s*", line_val, flags=re.I)
+        unit_type = m_split_sn[0].strip(" :;-,")
+        if len(m_split_sn) > 1:
+            unit_serial = m_split_sn[1].strip(" :;-,")
+
+    if not unit_type:
+        m_model = re.search(r"\b(uDR[\s*]+[0-9A-Za-z\-]+|OPTIMA[ \t]+XR[0-9A-Z]+(?:\s+[A-Z0-9]+)?|SOMATOM[ \t]+[^\n\r]+|Azurion[ \t]+[^\n\r]+)\b", eq_text, re.I)
+        unit_type = clean_value(m_model.group(1)).strip(" :;-,") if m_model else ""
+
+    if not unit_serial:
+        m_serial = re.search(r"\b(SB[0-9]{5,}[A-Z0-9]*)\b", eq_text, re.I)
+        if not m_serial:
+            m_serial = re.search(r"(?:No\s*Seri(?:\s+Alat|\s+Pesawat|\s+Unit)?|Serial\s+Number)\s*[:=\-–]?\s*([A-Za-z0-9\-_]+)", eq_text, re.I)
+        unit_serial = clean_value(m_serial.group(1)).strip(" :;-,") if m_serial else ""
 
     # 4. Unit brand
-    m_ubrand = re.search(r"(?:Merk Alat|Merek Alat|Pabrikan Alat|Manufacturer)\s*[:=\-–]?\s*([^\n\r]+)", all_text, re.I)
+    m_ubrand = re.search(r"(?:Merk(?:\s+Alat|\s+Unit|\s+Pesawat)?|Merek(?:\s+Alat|\s+Unit|\s+Pesawat)?|Pabrikan|Manufacturer)\s*[:=\-–]\s*([^\n\r]+)", eq_text, re.I)
     if m_ubrand:
         cand_ub = clean_value(m_ubrand.group(1)).strip(" :;-,")
         cand_ub = re.sub(r"\s+(?:Corporation|Corp|Healthcare|Health|Medical|Systems|Inc|Co\.,?\s*Ltd)\b.*$", "", cand_ub, flags=re.I).strip()
-        m_kb_match = re.search(r"\b(SIEMENS|PHILIPS|GE|SHIMADZU|TOSHIBA|HITACHI|CANON|CARESTREAM|FUJIFILM|MINDRAY|ALLENGERS|ECORAY)\b", cand_ub, re.I)
-        unit_brand = m_kb_match.group(1).upper() if m_kb_match else cand_ub
+        m_kb_match = re.search(r"\b(UNITED\s+IMAGING|UIH|SIEMENS|PHILIPS|GE|SHIMADZU|TOSHIBA|HITACHI|CANON|CARESTREAM|FUJIFILM|MINDRAY|ALLENGERS|ECORAY)\b", cand_ub, re.I)
+        if m_kb_match:
+            kb_n = m_kb_match.group(1).upper()
+            unit_brand = "United Imaging Healthcare" if kb_n in {"UNITED IMAGING", "UIH"} else ("GE" if kb_n == "GE" else kb_n.capitalize())
+        else:
+            unit_brand = cand_ub
+    elif re.search(r"\b(?:UNITED\s+IMAGING|UIH)\b", eq_text, re.I) or "UDR" in unit_type.upper():
+        unit_brand = "United Imaging Healthcare"
     elif "OPTIMA" in unit_type.upper():
         unit_brand = "GE"
     elif "SOMATOM" in unit_type.upper():
@@ -931,39 +964,64 @@ def extract_paparan_radiasi_data(pages_text, tables=None):
     elif "AZURION" in unit_type.upper():
         unit_brand = "Philips"
     else:
-        m_kb = re.search(r"\b(GE|PHILIPS|SIEMENS|SHIMADZU|TOSHIBA|HITACHI|CANON|CARESTREAM|FUJIFILM|MINDRAY|ALLENGERS)\b", all_text, re.I)
+        m_kb = re.search(r"\b(UNITED\s+IMAGING|UIH|GE|PHILIPS|SIEMENS|SHIMADZU|TOSHIBA|HITACHI|CANON|CARESTREAM|FUJIFILM|MINDRAY|ALLENGERS)\b", eq_text, re.I)
         unit_brand = m_kb.group(1).upper() if m_kb else ""
+        if unit_brand in {"UNITED IMAGING", "UIH"}:
+            unit_brand = "United Imaging Healthcare"
 
     unit_type_serial = f"{unit_type} / {unit_serial}".strip(" /")
 
     # 5. Tube brand
-    m_tb = re.search(r"\b(CANON(?: ELECTRON)?|TOSHIBA|PHILIPS|SIEMENS|GE|SHIMADZU|VARIAN|DUNLEE|IAE)\b", all_text, re.I)
+    m_tb = re.search(r"(?:Merk\s+Tabung|Merek\s+Tabung|Tube\s+Manufacturer|Tube\s+Brand)\s*[:=\-–]?\s*([^\n\r]+)", eq_text, re.I)
+    if not m_tb:
+        m_tb = re.search(r"\b(CANON(?: ELECTRON)?|TOSHIBA|PHILIPS|SIEMENS|GE|SHIMADZU|VARIAN|DUNLEE|IAE)\b", eq_text, re.I)
     tube_brand = clean_value(m_tb.group(1)).strip(" :;-,") if m_tb else ""
     if "CANON" in tube_brand.upper():
         tube_brand = "CANON"
 
-    # 6. Tube type (prioritize Insert Model if present, fallback to Tube/Housing model)
-    tube_type = _extract_tube_insert_model(all_text)
-    if not tube_type:
-        m_tt = re.search(r"\b(E[0-9]{4}[A-Z]?|MRC[ \t]*[0-9]+|ATHLON[ \t]*[A-Z]+)\b", all_text, re.I)
-        if not m_tt:
-            m_tt = re.search(RX_HOUSING_MODEL, all_text, re.I)
-        if not m_tt:
-            m_tt = re.search(r"(?:Tipe Tabung|No Model Tabung)\s*[:=\-–]?\s*([^\n\r]+)", all_text, re.I)
-        cand_tt = clean_value(m_tt.group(1)).strip(" :;-,") if m_tt else ""
-        if not (cand_tt.isdigit() and len(cand_tt) <= 2):
-            tube_type = cand_tt
+    # 6. Tube insert model & serial (prioritize Insert Model & S/N per BAPETEN standard)
+    tube_type = ""
+    tube_serial = ""
+    m_ins_line = re.search(r"(?:Model\s+insert|Insert(?:\s+Model)?|Tipe\s+Insert|No\.?\s*Model\s+Insert)\s*[:=\-–]\s*([^\n\r]+)", eq_text, re.I)
+    if m_ins_line:
+        raw_ins = clean_value(m_ins_line.group(1)).strip(" :;-,")
+        m_ins_split = re.split(r"\s+(?:S/?N|Serial(?:\s+No|\s+Number)?|No\.?\s*Seri)\s*[:=\-–]?\s*", raw_ins, flags=re.I)
+        tube_type = m_ins_split[0].strip(" :;-,")
+        if len(m_ins_split) > 1:
+            tube_serial = m_ins_split[1].strip(" :;-,")
 
-    # 7. Tube serial (Prioritize Insert S/N over Housing S/N per BAPETEN standard)
-    m_insert_sn = re.search(RX_INSERT_SERIAL, all_text, re.I)
-    if m_insert_sn:
-        tube_serial = clean_value(m_insert_sn.group(1)).strip(" :;-,")
-    else:
-        m_ts = re.search(RX_HOUSING_SERIAL, all_text, re.I)
+    if not tube_type:
+        tube_type = _extract_tube_insert_model(eq_text)
+        if not tube_type:
+            m_tt = re.search(r"\b(E[0-9]{4}[A-Z]?|MRC[ \t]*[0-9]+|ATHLON[ \t]*[A-Z]+)\b", eq_text, re.I)
+            if not m_tt:
+                m_tt = re.search(RX_HOUSING_MODEL, eq_text, re.I)
+            if not m_tt:
+                m_tt = re.search(r"(?:Tipe Tabung|No Model Tabung)\s*[:=\-–]?\s*([^\n\r]+)", eq_text, re.I)
+            cand_tt = clean_value(m_tt.group(1)).strip(" :;-,") if m_tt else ""
+            if not (cand_tt.isdigit() and len(cand_tt) <= 2):
+                tube_type = cand_tt
+
+    if not tube_serial:
+        m_insert_sn = re.search(RX_INSERT_SERIAL, eq_text, re.I)
+        if m_insert_sn:
+            tube_serial = clean_value(m_insert_sn.group(1)).strip(" :;-,")
+        else:
+            m_house_line = re.search(r"(?:Model\s+Housing|Housing(?:\s+Model)?|Tipe\s+Housing)\s*[:=\-–]\s*([^\n\r]+)", eq_text, re.I)
+            if m_house_line:
+                raw_h = clean_value(m_house_line.group(1)).strip(" :;-,")
+                m_h_split = re.split(r"\s+(?:S/?N|Serial(?:\s+No|\s+Number)?|No\.?\s*Seri)\s*[:=\-–]?\s*", raw_h, flags=re.I)
+                if not tube_type:
+                    tube_type = m_h_split[0].strip(" :;-,")
+                if len(m_h_split) > 1:
+                    tube_serial = m_h_split[1].strip(" :;-,")
+
+    if not tube_serial:
+        m_ts = re.search(RX_HOUSING_SERIAL, eq_text, re.I)
         if m_ts:
             tube_serial = clean_value(m_ts.group(1)).strip(" :;-,")
         else:
-            m_cand = re.search(r"\b([0-9]{2}[A-Z][0-9]{3,}|[0-9][A-Z][0-9]{4,}|OF[0-9]{4}|0F[0-9]{4})\b", all_text, re.I)
+            m_cand = re.search(r"\b([0-9]{2}[A-Z][0-9]{3,}|[0-9][A-Z][0-9]{4,}|OF[0-9]{4}|0F[0-9]{4})\b", eq_text, re.I)
             tube_serial = clean_value(m_cand.group(1)).strip(" :;-,") if m_cand else ""
 
     tube_serial = _normalize_ocr_serial(tube_serial)
@@ -1022,7 +1080,7 @@ def extract_uji_fungsi_data(pages_text, tables=None):
         cand = clean_value(m_name.group(1)).strip(" :;-,")
         # Strip adjacent table columns on the same line (PO number, Contract, Address, Mechanical test items, etc.)
         cand = re.split(
-            r"\b(?:Tube(?:\s+tilt)?|Mechanical|InSpec|Horizontal|Vertical|Collimator|Colimator|Brake|Batere|Status|PASS|FAIL|NOT\s+AVAILABLE|BJ\.|PO\b|Purchase|Ref\.|Contract|Kontrak|Address|Alamat|Bagian|Radiology|Section)\b",
+            r"\b(?:Report\s+No|Device\s+model|Installation\s+date|Tube(?:\s+tilt)?|Mechanical|InSpec|Horizontal|Vertical|Collimator|Colimator|Brake|Batere|Status|PASS|FAIL|NOT\s+AVAILABLE|BJ\.|PO\b|Purchase|Ref\.|Contract|Kontrak|Address|Alamat|Bagian|Radiology|Section)\b",
             cand,
             flags=re.I,
         )[0].strip(" :;-,")
@@ -1093,12 +1151,14 @@ def extract_uji_fungsi_data(pages_text, tables=None):
     if m_ubrand:
         cand_ub = clean_value(m_ubrand.group(1)).strip(" :;-,")
         cand_ub = re.sub(r"\s+(?:Corporation|Corp|Healthcare|Health|Medical|Systems|Inc|Co\.,?\s*Ltd)\b.*$", "", cand_ub, flags=re.I).strip()
-        m_kb_match = re.search(r"\b(SIEMENS|PHILIPS|GE|SHIMADZU|TOSHIBA|HITACHI|CANON|CARESTREAM|FUJIFILM|MINDRAY|ALLENGERS|ECORAY)\b", cand_ub, re.I)
+        m_kb_match = re.search(r"\b(UNITED\s+IMAGING|UIH|SIEMENS|PHILIPS|GE|SHIMADZU|TOSHIBA|HITACHI|CANON|CARESTREAM|FUJIFILM|MINDRAY|ALLENGERS|ECORAY)\b", cand_ub, re.I)
         if m_kb_match:
-            kb_name = m_kb_match.group(1).capitalize()
-            unit_brand = "GE" if kb_name.upper() == "GE" else kb_name
+            kb_name = m_kb_match.group(1)
+            unit_brand = "United Imaging Healthcare" if kb_name.upper() in {"UNITED IMAGING", "UIH"} else ("GE" if kb_name.upper() == "GE" else kb_name.capitalize())
         else:
             unit_brand = cand_ub
+    elif re.search(r"\b(?:UNITED\s+IMAGING|UIH|SHANGHAI\s+UNITED\s+IMAGING)\b", all_text, re.I) or re.search(r"\buDR\b", all_text, re.I):
+        unit_brand = "United Imaging Healthcare"
     elif re.search(r"\b(?:PT\.?\s*)?SIEMENS(?:\s+HEALTHINEERS)?\b", all_text, re.I) or re.search(r"Somatom", all_text, re.I):
         unit_brand = "Siemens"
     elif re.search(r"\b(?:PT\s+PHILIPS|PHILIPS)\b", all_text, re.I) or re.search(r"Azurion", all_text, re.I):
@@ -1108,36 +1168,44 @@ def extract_uji_fungsi_data(pages_text, tables=None):
     elif re.search(r"\bSHIMADZU\b", all_text, re.I) or re.search(r"RADspeed", all_text, re.I):
         unit_brand = "Shimadzu"
     else:
-        m_kb = re.search(r"\b(SIEMENS|PHILIPS|GE|SHIMADZU|TOSHIBA|HITACHI|CANON|CARESTREAM|FUJIFILM|MINDRAY|ALLENGERS|ECORAY)\b", all_text, re.I)
+        m_kb = re.search(r"\b(UNITED\s+IMAGING|UIH|SIEMENS|PHILIPS|GE|SHIMADZU|TOSHIBA|HITACHI|CANON|CARESTREAM|FUJIFILM|MINDRAY|ALLENGERS|ECORAY)\b", all_text, re.I)
         unit_brand = m_kb.group(1).capitalize() if m_kb else ""
-        if unit_brand.upper() == "GE":
+        if unit_brand.upper() in {"UNITED IMAGING", "UIH"}:
+            unit_brand = "United Imaging Healthcare"
+        elif unit_brand.upper() == "GE":
             unit_brand = "GE"
 
     # 4. Unit Type / Model
     m_utype = re.search(
-        r"(?:Product\s+Name|Nama\s+Alat|Equipment\s+Name|Unit\s+Type|Model(?:\s+Unit|\s+Alat)?|Jenis\s+Pesawat|Tipe\s+Unit)\s*[:=\-–]\s*([^\n\r]+)",
+        r"(?:Product\s+Name|Nama\s+Alat|Equipment\s+Name|Unit\s+Type|\bModel(?:\s+Unit|\s+Alat)?\b|Jenis\s+Pesawat|Tipe\s+Unit|Device\s+model)\s*[:=\-–]\s*([^\n\r]+)",
         all_text,
         re.I,
     )
     if m_utype:
         raw_ut = m_utype.group(1)
-        raw_ut = re.sub(r"\s+(?:Serial Number|Nomor seri|InSpec|Subsystem|Product Number).*$", "", raw_ut, flags=re.I).strip()
+        raw_ut = re.sub(r"\s+(?:Device\s+serial|Serial Number|Nomor seri|InSpec|Subsystem|Product Number).*$", "", raw_ut, flags=re.I).strip()
         unit_type = clean_value(raw_ut).strip(" :;-,")
     else:
         m_ut_line = re.search(r"(?:Unit\s+Type|Equipment\s+Type)\s+([A-Za-z0-9 ]+?)(?:\s+(?:InSpec|Serial|Status)|$)", all_text, re.I)
         if m_ut_line:
             unit_type = clean_value(m_ut_line.group(1)).strip(" :;-,")
         else:
-            m_ut_fallback = re.search(r"\b(Somatom\s+go[\. ]*(?:Top|Up|All|Now)?|Azurion\s+[0-9]\s+[A-Za-z0-9]+|Optima\s+XR[0-9A-Za-z]+|XR[0-9]+\s+[A-Z0-9]+)\b", all_text, re.I)
+            m_ut_fallback = re.search(r"\b(uDR[\s*]+[0-9A-Za-z\-]+|Somatom\s+go[\. ]*(?:Top|Up|All|Now)?|Azurion\s+[0-9]\s+[A-Za-z0-9]+|Optima\s+XR[0-9A-Za-z]+|XR[0-9]+\s+[A-Z0-9]+)\b", all_text, re.I)
             unit_type = clean_value(m_ut_fallback.group(1)).strip(" :;-,") if m_ut_fallback else ""
 
     # 5. Unit Serial Number
     m_sb = re.search(r"\b(SB[0-9]{5,}[A-Z0-9]*)\b", all_text)
     m_usn = re.search(
-        r"(?:Nomor\s+seri\s+alat|No\.?\s*Seri(?:\s+Alat|\s+Unit)?)\s*[:=\-–]\s*([A-Za-z0-9\-_]+)",
+        r"(?:Device\s+serial(?:\s+No\.?|\s+Number)?|Nomor\s+seri\s+alat|No\.?\s*Seri(?:\s+Alat|\s+Unit)?)\s*[:=\-–]?\s*([A-Za-z0-9\-_]+)",
         all_text,
         re.I,
     )
+    m_p_sn = re.search(r"(?:Product\s+Name[^\n]+)?Serial\s+Number\s*[:=\-–]?\s*([A-Za-z0-9\-_]+)", all_text, re.I)
+    
+    if m_sb:
+        unit_serial = clean_value(m_sb.group(1)).strip(" :;-,")
+    elif m_usn:
+        unit_serial = clean_value(m_usn.group(1)).strip(" :;-,")
     m_p_sn = re.search(r"(?:Product\s+Name[^\n]+)?Serial\s+Number\s*[:=\-–]?\s*([A-Za-z0-9\-_]+)", all_text, re.I)
     
     if m_sb:
@@ -1206,6 +1274,138 @@ def extract_uji_fungsi_data(pages_text, tables=None):
         "tube_type_serial": {"value": tube_type_serial, "page": 1, "method": "ocr_regex", "confidence": 1.0 if tube_type_serial else None},
         "tube_type": {"value": tube_type, "page": 1, "method": "ocr_regex", "confidence": 1.0 if tube_type else None},
         "tube_serial_number": {"value": tube_serial, "page": 1, "method": "ocr_regex", "confidence": 1.0 if tube_serial else None},
+    }
+
+
+def extract_laporan_dosis_awal_data(pages_text, tables=None, context=None):
+    all_text = "\n".join(pages_text or [])
+
+    # 1. hospital_name
+    hospital_name = ""
+    m_name = re.search(r"Instansi\s*[:=\-–]?\s*([^\n\r]+?)(?:\s+Tanggal|\s+No\.|\s*$)", all_text, re.I)
+    if m_name:
+        hospital_name = clean_value(m_name.group(1)).strip(" :;-,")
+    if not hospital_name:
+        fac_name, _ = extract_facility_name(pages_text)
+        if fac_name:
+            hospital_name = fac_name
+
+    # 2. hospital_address
+    hospital_address = ""
+    m_addr = re.search(r"Alamat(?:\s+Instansi)?\s*[:=\-–]?\s*([\s\S]+?)(?:\n\s*(?:Tanggal|Untuk|No\.|Catatan)|$)", all_text, re.I)
+    if m_addr:
+        raw_addr = m_addr.group(1)
+        raw_addr = re.sub(r"\s+", " ", raw_addr).strip(" :;-,")
+        raw_addr = re.split(r"\b(?:Tanggal\s+Evaluasi|Tanggal\s+Pelaporan|Untuk\s+Rencana)\b", raw_addr, flags=re.I)[0].strip(" :;-,")
+        hospital_address = raw_addr
+    if not hospital_address:
+        fac_addr, _ = extract_facility_address(pages_text)
+        if fac_addr:
+            hospital_address = fac_addr
+
+    # 3. usage_period
+    m_period = re.search(r"(?:Untuk\s+Rencana\s+Periode\s+Pemakaian|Periode\s+Pemakaian|Rencana\s+Periode)\s*[:=\-–]?\s*([^\n\r]+)", all_text, re.I)
+    usage_period = clean_value(m_period.group(1)).strip(" :;-,") if m_period else ""
+
+    # 4. person_name / personnel list
+    personnel_names = []
+    if tables:
+        for tbl_item in tables:
+            tbl = tbl_item[1] if isinstance(tbl_item, (tuple, list)) and len(tbl_item) == 2 and isinstance(tbl_item[0], int) else tbl_item
+            if not tbl or len(tbl) < 2:
+                continue
+            hdr = [str(c or "").lower() for c in tbl[0]]
+            name_col = -1
+            for c_i, h in enumerate(hdr):
+                if "nama" in h or "pengguna" in h:
+                    name_col = c_i
+                    break
+            if name_col != -1:
+                for row in tbl[1:]:
+                    if name_col < len(row) and row[name_col]:
+                        val = str(row[name_col]).strip()
+                        if val and not re.search(r"\b(?:kontrol|control|nama|pengguna)\b", val, re.I) and len(val) >= 3:
+                            personnel_names.append(clean_value(val))
+                if personnel_names:
+                    break
+
+    if not personnel_names:
+        for line in all_text.splitlines():
+            m_row = re.search(r"(?:XA[0-9A-Za-z]+|\b\d+\b)\s+([A-Za-z][A-Za-z\s.,'\-]+?)\s+(?:0[,.]000|[0-9]+[,.][0-9]+)", line)
+            if m_row:
+                cand = m_row.group(1).strip()
+                if not re.search(r"\b(?:kontrol|control|dosis|badan|kulit)\b", cand, re.I) and len(cand) >= 3:
+                    personnel_names.append(clean_value(cand))
+
+    selected_person = ""
+    if personnel_names:
+        if context and (context.get("person_name") or context.get("applicant_name")):
+            from rapidfuzz import fuzz
+            from src.matching.normalizer import normalize_person_name
+            target_name = context.get("person_name") or context.get("applicant_name")
+            target_norm = normalize_person_name(target_name)
+            best_match = max(personnel_names, key=lambda n: fuzz.token_sort_ratio(normalize_person_name(n), target_norm))
+            if fuzz.token_sort_ratio(normalize_person_name(best_match), target_norm) >= 60:
+                selected_person = best_match
+        if not selected_person:
+            doc = next((n for n in personnel_names if re.search(r"\b(?:dr\b|drg\b|dokter|sp\.rad)\b", n, re.I)), None)
+            selected_person = doc or personnel_names[0]
+
+    return {
+        "hospital_name": {"value": hospital_name or "-", "page": 1, "method": "native_text_regex", "confidence": 1.0 if hospital_name else None},
+        "hospital_address": {"value": hospital_address or "-", "page": 1, "method": "native_text_regex", "confidence": 1.0 if hospital_address else None},
+        "usage_period": {"value": usage_period or "-", "page": 1, "method": "native_text_regex", "confidence": 1.0 if usage_period else None},
+        "person_name": {"value": selected_person or "-", "page": 1, "method": "native_text_regex", "confidence": 1.0 if selected_person else None},
+        "all_personnel": personnel_names,
+    }
+
+
+def extract_gedung_penahan_radiasi_data(pages_text, tables=None):
+    all_text = "\n".join(pages_text or [])
+
+    # 1. hospital_name
+    hospital_name = ""
+    m_quote = re.search(r"[\"“'‘`\ufffd\(\[]\s*(RUMAH\s+SAKIT\s+[^\r\n\"”'’`\ufffd\)\]]+|RS\s+[^\r\n\"”'’`\ufffd\)\]]+|KLINIK\s+[^\r\n\"”'’`\ufffd\)\]]+)[\"”'’`\ufffd\)\]]", all_text, re.I)
+    if m_quote:
+        hospital_name = clean_value(m_quote.group(1)).strip(" :;-,")
+    if not hospital_name and pages_text:
+        m_cov = re.search(r"\b(RUMAH\s+SAKIT\s+[^\r\n]+|RS\s+[^\r\n]+|KLINIK\s+[^\r\n]+)\b", pages_text[0], re.I)
+        if m_cov:
+            hospital_name = clean_value(m_cov.group(1)).strip(" :;-,")
+    if not hospital_name:
+        fac_name, _ = extract_facility_name(pages_text)
+        if fac_name:
+            hospital_name = fac_name
+
+    # 2. hospital_address
+    hospital_address = ""
+    target_page = pages_text[1] if len(pages_text or []) > 1 else all_text
+    m_addr = re.search(r"\b((?:J[IlL1]\.?|Jalan)\s+[^\r\n]+(?:\r?\n[ \t]*(?:RT|RW|Kelurahan|Kecamatan|Kabupaten|Kota|[A-Z][a-z]+)[^\r\n]+){1,3})", target_page, re.I)
+    if m_addr:
+        raw_block = m_addr.group(1)
+        cleaned_lines = []
+        for line in raw_block.splitlines():
+            line = re.sub(r"\s+(?:Tanggal|Hal|No\.?\s*Dokumen)\s*:?.*$", "", line, flags=re.I).strip(" :;-,")
+            if line and not re.search(r"^(?:LEMBAR|DAFTAR|BAB|Nama|Jabatan|Hal|No\.?)\b", line, re.I):
+                cleaned_lines.append(line)
+        if cleaned_lines:
+            hospital_address = ", ".join(cleaned_lines)
+    if not hospital_address:
+        m_gen_jl = re.search(r"\b(J[IlL1]\.?[ \t]+[^\r\n|]+(?:\r?\n[^\r\n|]+){1,2})", target_page, re.I)
+        if m_gen_jl:
+            raw_addr = re.sub(r"\s+", " ", m_gen_jl.group(1)).strip(" :;-,")
+            raw_addr = re.split(r"\b(?:No\.?\s*Dokumen|Tanggal\s*:|Hal\s*:)\b", raw_addr, flags=re.I)[0].strip(" :;-,")
+            if len(raw_addr) >= 10:
+                hospital_address = raw_addr
+    if not hospital_address:
+        fac_addr, _ = extract_facility_address(pages_text)
+        if fac_addr:
+            hospital_address = fac_addr
+
+    p_num = 2 if len(pages_text or []) >= 2 else 1
+    return {
+        "hospital_name": {"value": hospital_name or "-", "page": p_num, "method": "native_text_regex", "confidence": 1.0 if hospital_name else None},
+        "hospital_address": {"value": hospital_address or "-", "page": p_num, "method": "native_text_regex", "confidence": 1.0 if hospital_address else None},
     }
 
 
@@ -1287,6 +1487,12 @@ def parse_document(doc_type, pages_text, tables=None, context=None):
 
     if doc_type == "uji_fungsi":
         return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_uji_fungsi_data(pages_text, tables))}
+
+    if doc_type == "laporan_dosis_awal":
+        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_laporan_dosis_awal_data(pages_text, tables, context=context))}
+
+    if doc_type == "gedung_penahan_radiasi":
+        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_gedung_penahan_radiasi_data(pages_text, tables))}
 
     generic_fields = [f for f in fields if f not in {"administrative_documents", "personnel_data", "table_of_contents"}]
     generic = extract_generic_fields(pages_text, generic_fields)

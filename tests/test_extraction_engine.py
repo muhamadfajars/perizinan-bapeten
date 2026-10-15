@@ -863,7 +863,7 @@ def test_generalization_unseen_hospital_and_provinces():
     assert fp["hospital_name"]["value"] == "RSUP Jayapura"
     assert "Jl. Kesehatan No. 1" in fp["hospital_address"]["value"]
     assert "Jayapura" in fp["hospital_address"]["value"]
-    assert fp["unit_brand"]["value"] == "CARESTREAM"
+    assert fp["unit_brand"]["value"].upper() == "CARESTREAM"
     assert "DRX-Evolution Plus" in fp["unit_type_serial"]["value"]
     assert fp["unit_serial_number"]["value"] == "CS-334455"
 
@@ -1068,6 +1068,269 @@ def test_ppkr_tube_insert_serial_priority():
     assert f["tube_type"]["value"] == "E7894X"
     assert f["tube_serial_number"]["value"] == "0F1376"
     assert f["tube_type_serial"]["value"] == "E7894X / 0F1376"
+
+
+def test_laporan_dosis_awal_extraction():
+    from src.extraction.document_parser import parse_document
+
+    sample_osl_text = (
+        "LABORATORIUM DOSIMETRI\n"
+        "OSLINDO LAB\n"
+        "PT. MAQASS TECHRAD INDONESIA\n"
+        "Jl. H. Samali No. 77B, Pasar Minggu, Jakarta Selatan, DKI Jakarta\n"
+        "F-7.8(a)\n"
+        "LAPORAN DOSIS AWAL LENCANA OSL\n"
+        "2026310201\n"
+        "Instansi : Rumah Sakit Hermina Kepanjen Tanggal Penerimaan : Lencana Baru\n"
+        "Alamat : Jalan Raya Mojosari, RT. 02/ RW. 01, Kec. Kepanjen, Kab. Malang, Jawa Timur 65163\n"
+        "Tanggal Evaluasi : 14 Juli 2026\n"
+        "Tanggal Pelaporan : 14 Juli 2026\n"
+        "Untuk Rencana Periode Pemakaian : Oktober - Desember 2026\n"
+        "No. NPR ID Lencana OSL Nama Pengguna Lencana OSL Dosis Badan - Hp (10) (mSv) Dosis Kulit - Hp (0.07) (mSv)\n"
+        "1 XA04269530B OSL Kontrol 0,000 0,000 0,000 0,000\n"
+        "2 XA042695327 dr. Dhanti Erma Widiasi 0,000 0,000 0,000 0,000\n"
+        "3 XA04269528W Nurully Andriardi Lestarini 0,000 0,000 0,000 0,000\n"
+        "4 XA04269626Y Siti Azizah 0,000 0,000 0,000 0,000\n"
+        "5 XA042696250 Shofayana Wardatul Jamilah 0,000 0,000 0,000 0,000\n"
+    )
+
+    res = parse_document("laporan_dosis_awal", [sample_osl_text])
+    f = res["fields"]
+
+    assert f["hospital_name"]["value"] == "Rumah Sakit Hermina Kepanjen"
+    assert "Jalan Raya Mojosari" in f["hospital_address"]["value"]
+    assert "Malang" in f["hospital_address"]["value"]
+    assert f["usage_period"]["value"] == "Oktober - Desember 2026"
+    assert f["person_name"]["value"] == "dr. Dhanti Erma Widiasi"
+
+    # Context test matching another personnel
+    res_ctx = parse_document("laporan_dosis_awal", [sample_osl_text], context={"person_name": "Siti Azizah"})
+    assert res_ctx["fields"]["person_name"]["value"] == "Siti Azizah"
+
+
+def test_gedung_penahan_radiasi_extraction():
+    from src.extraction.document_parser import parse_document
+
+    p1_cover = (
+        "RENCANA TEKNIS FASILITAS BANGUNAN\n"
+        "GEDUNG PENAHAN RADIASI\n"
+        "RUANG RADIOLOGI\n"
+        "PT MEDIKALOKA KEPANJEN\n"
+        "RS HERMINA KEPANJEN\n"
+        "TAHUN 2026\n"
+    )
+    p2_header = (
+        "RENCANA TEKNIS FASILITAS BANGUNAN\n"
+        "GEDUNG PENAHAN RADIASI\n"
+        "RUANG RADIOLOGI\n"
+        "“RUMAH SAKIT HERMINA KEPANJEN”\n"
+        "Jl. Raya Mojosari RT 02/01,\n"
+        "Kecamatan Kepanjen\n"
+        "Kabupaten Malang\n"
+        "No. Dokumen : 0014/JANGMED/RSHKPN/VII/2026\n"
+        "Tanggal : 14 Juli 2026\n"
+    )
+
+    res = parse_document("gedung_penahan_radiasi", [p1_cover, p2_header])
+    f = res["fields"]
+
+    assert "HERMINA KEPANJEN" in f["hospital_name"]["value"].upper()
+    assert "Mojosari" in f["hospital_address"]["value"]
+    assert "Kepanjen" in f["hospital_address"]["value"]
+    assert "Malang" in f["hospital_address"]["value"]
+
+
+def test_uji_fungsi_united_imaging_extraction():
+    from src.extraction.document_parser import parse_document
+
+    p2_cover = (
+        "UNITED IMAGING Shanghai United Imaging Healthcare Co., Ltd.\n"
+        "XR System Installation and Verification Record\n"
+        "This report applies to the following models:\n"
+        "uDR 596i, uDR 592h, uDR 566i-A, uDR 566i-B\n"
+    )
+    p3_basic = (
+        "UNITED IMAGING Shanghai United Imaging Healthcare Co., Ltd.\n"
+        "Basic information\n"
+        "Hospital name: RS Hermina Kepanjen Report No.: IWO-INS2600914\n"
+        "Device model: uDR 566i-A Device serial No.: 294248\n"
+        "Software version: R002.38.0.12168-690404\n"
+        "Installation date(MM-DD-YYYY): 06-11-2026 to 06-16-2026 Customer service engineer: Ahmad Kamal\n"
+    )
+
+    res = parse_document("uji_fungsi", [p2_cover, p3_basic])
+    f = res["fields"]
+
+    assert f["hospital_name"]["value"] == "RS Hermina Kepanjen"
+    assert "United Imaging" in f["unit_brand"]["value"]
+    assert f["unit_type"]["value"] == "uDR 566i-A"
+    assert f["unit_serial_number"]["value"] == "294248"
+
+
+def test_paparan_radiasi_dv_medika_extraction():
+    from src.extraction.document_parser import parse_document
+
+    sample_text = (
+        "DVMEDIKA PT. D&V INTERNATIONAL MAKMUR GEMILANG\n"
+        "Foresta Business Loft 3 No.1 HOLDING COMPANY\n"
+        "GROUP OF DV MEDIKA HEALTHCARE Jl BSD Boulevard Utara Tangerang 15331\n"
+        "+62 21 2223 5868\n"
+        "PENGUKURAN PAPARAN RADIASI\n"
+        "No: 59/DVI/PPR/2026\n"
+        "I. DATA INSTANSI\n"
+        "1. Nama Instansi : RS Hermina Kepanjen\n"
+        "2. Alamat : Jalan Raya Mojosari RT 02/01 Kelurahan Mojosari, Kecamatan\n"
+        "Kepanjen, Kabupaten Malang, Jawa Timur\n"
+        "3. Nama Ruangan : Ruang Radiologi\n"
+        "4. Penanggung Jawab : dr. Dede Setyadi, MARS\n"
+        "5. Petugas Proteksi Radiasi : Siti Azizah SIB:352403.224.02.101123\n"
+        "6. Personal Monitoring : TLD\n"
+        "II. DATA PESAWAT DAN SUMBER RADIASI\n"
+        "1. Nama Pesawat : Digital Radiography\n"
+        "2. Merk : United Imaging\n"
+        "3. Tipe : uDR 566i A S/N :294248\n"
+        "4. Merk Tabung : Canon Rotanode\n"
+        "5. Tahun Pembuatan Tabung : April 2025\n"
+        "6. Model Housing :E7876X S/N :25D1063\n"
+        "7. Model insert :E7876 S/N :25D0610\n"
+        "8. Kondisi Maksimum : 150 KV 630 mA\n"
+        "III. IMPORTIR/ INSTALATIR\n"
+        "1. Importir : PT D&V International Makmur Gemilang\n"
+        "2. Alamat : Foresta Bussiness Loft 3 No 1 BSD City Tangerang\n"
+        "Jl. Boulevard BSD Kec. Pagedangan 15331\n"
+    )
+
+    res = parse_document("paparan_radiasi", [sample_text])
+    f = res["fields"]
+
+    assert f["hospital_name"]["value"] == "RS Hermina Kepanjen"
+    # Ensure hospital address is from Section I (RS), NOT from kop surat (Tangerang/BSD) or importir
+    assert "Jalan Raya Mojosari" in f["hospital_address"]["value"]
+    assert "Malang" in f["hospital_address"]["value"]
+    assert "Tangerang" not in f["hospital_address"]["value"]
+    assert "Boulevard" not in f["hospital_address"]["value"]
+
+    # Verify equipment fields
+    assert "United Imaging" in f["unit_brand"]["value"]
+    assert f["unit_type"]["value"] == "uDR 566i A"
+    assert f["unit_serial_number"]["value"] == "294248"
+    assert f["tube_brand"]["value"] == "CANON"
+    assert f["tube_type"]["value"] == "E7876"
+    assert f["tube_serial_number"]["value"] == "25D0610"
+
+
+def test_sistem_manajemen_and_program_perawatan_facility_extraction():
+    from src.extraction.document_parser import parse_document
+
+    sm_p1 = (
+        "SISTEM MANAJEMEN FASILITAS\n"
+        "No. Dok 11/ JANGMED/RSHKPN/VII/2026\n"
+        "RADIOLOGI DIAGNOSTIK DAN\n"
+        "Tanggal 13 Juli 2026\n"
+        "INTERVENSIONAL\n"
+        "Revisi 0\n"
+        "RS HERMINA KEPANJEN\n"
+        "Jl. Raya Mojosari RT 02/01,\n"
+        "Halaman 1 dari 74\n"
+        "Kecamatan Kepanjen\n"
+        "Kabupaten Malang\n"
+        "Telp. (0341) 3396888\n"
+        "Website : www.herminahospitals.com\n"
+        "LEMBAR PENGESAHAN\n"
+    )
+    sm_p3 = "III.3. Kebijakan Keselamatan Radiasi Rumah Sakit 24\n"
+
+    res_sm = parse_document("sistem_manajemen", [sm_p1, "DAFTAR ISI\n", sm_p3])
+    f_sm = res_sm["fields"]
+    assert f_sm["hospital_name"]["value"] == "RS HERMINA KEPANJEN"
+    assert f_sm["hospital_name"]["value"] != "Rumah Sakit 24"
+    assert "Jl. Raya Mojosari" in f_sm["hospital_address"]["value"]
+    assert "Malang" in f_sm["hospital_address"]["value"]
+
+    pp_p1 = (
+        "No. Dok:\n"
+        "PROGRAM PERAWATAN\n"
+        "10/ JANGMED/RSHKPN/VII/2026\n"
+        "PESAWAT SINAR-X RADIOLOGI DIAGNOSTIK\n"
+        "Tanggal: 13 Juli 2026\n"
+        "DAN INTERVENSIONAL\n"
+        "RS HERMINA KEPANJEN\n"
+        "Revisi: 00\n"
+        "Jl. Raya Mojosari RT 02/01, Kecamatan Kepanjen\n"
+        "Kabupaten Malang\n"
+        "Telp. (0341) 3396888\n"
+        "Halaman : 1/77\n"
+        "Website : www.herminahospitals.com\n"
+    )
+    pp_p14 = (
+        "7. Melapor kepada pimpinan rumah sakit mengenai kebutuhan anggaran,\n"
+        "perbaikan, atau penggantian alat.\n"
+    )
+
+    res_pp = parse_document("program_perawatan", [pp_p1, pp_p14])
+    f_pp = res_pp["fields"]
+    assert f_pp["hospital_name"]["value"] == "RS HERMINA KEPANJEN"
+    assert "kebutuhan anggaran" not in f_pp["hospital_name"]["value"]
+    assert "Jl. Raya Mojosari" in f_pp["hospital_address"]["value"]
+    assert "Malang" in f_pp["hospital_address"]["value"]
+
+
+def test_classifier_sistem_manajemen_with_prinsip_keyword():
+    from src.extraction.classifier import CONTENT_PATTERNS
+    import re
+
+    sample_text = (
+        "SISTEM MANAJEMEN FASILITAS RADIOLOGI DIAGNOSTIK DAN INTERVENSIONAL\n"
+        "RS HERMINA KEPANJEN\n"
+        "I.7. Prinsip Dasar Sistem Manajemen\n"
+    )
+    text_upper = sample_text.upper()
+    detected = None
+    for pat, dt in CONTENT_PATTERNS:
+        if re.search(pat, text_upper, re.IGNORECASE):
+            detected = dt
+            break
+    assert detected == "sistem_manajemen"
+
+
+def test_ppkr_extracts_spaced_tube_type_and_serial_number():
+    """Verify that PPKR documents with wide-spaced kerning (e.g. 'T i p e   t a b u n g : E7 8 7 6'
+    and 'N o .   S e r i   t a b u n g : 2 5 D0 6 1 0') correctly extract tube_type and tube_serial_number
+    rather than returning '-' (empty)."""
+    from src.extraction.document_parser import parse_document
+
+    p18 = (
+        "Tabel 2. Data Ruang dan Alat X ray konvensional\n"
+        "Data pesawat\n"
+        "Merk pesawatsinar-X : S h a n g h a i Un i t e d I ma g i n g He a l t h c a r e Co . l t d\n"
+        "Tipe/modelpesawatsinar-X : u DR 5 6 6 i - A\n"
+        "No. Seripesawatsinar-X : 2 9 4 2 4 8\n"
+    )
+    p19 = (
+        "Data tabung\n"
+        "Merktabung : CANON ELEKTRON TUBES&DEVICES.CO.LTD\n"
+        "T i p e   t a b u n g : E7 8 7 6\n"
+        "N o .   S e r i   t a b u n g : 2 5 D0 6 1 0\n"
+        "Beda teganganmaksimumkV) : 1 5 0 k V\n"
+        "Ar u s ( m A ) m a k s i m u m : 6 3 0 mA\n"
+        "Arus waktu (mAs)maksimum : 1000 mAs\n"
+    )
+
+    res = parse_document("ppkr", [p18, p19])
+    f = res["fields"]
+
+    assert f["unit_type"]["value"] == "uDR 566i-A"
+    assert f["unit_serial_number"]["value"] == "294248"
+    assert "CANON" in f["tube_brand"]["value"]
+    assert f["tube_type"]["value"] == "E7876"
+    assert f["tube_serial_number"]["value"] == "25D0610"
+    assert "E7876" in f["tube_type_serial"]["value"]
+    assert "25D0610" in f["tube_type_serial"]["value"]
+
+
+
+
+
 
 
 

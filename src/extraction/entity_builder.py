@@ -317,7 +317,7 @@ def consolidate_application(extractions: Dict[str, List[Dict[str, Any]]]) -> App
     for doc in sib_docs:
         f = doc.get("fields", {})
         file_name = doc.get("file_name", "SIB.pdf")
-        sib_name = _get_val(f.get("ppr_name"))
+        sib_name = _get_val(f.get("ppr_name")) or _get_val(f.get("person_name"))
         sib_valid = _get_val(f.get("valid_until"))
 
         matched_ppr = find_best_ppr_match(sib_name, app.ppr)
@@ -329,14 +329,14 @@ def consolidate_application(extractions: Dict[str, List[Dict[str, Any]]]) -> App
                     file_name=file_name,
                     page=_get_page(f.get("valid_until")),
                 )
-        else:
+        elif sib_name:
             new_ppr = PPREntity(
                 id=f"ppr_sib_{len(app.ppr) + 1}",
                 name=ExtractedField[str].from_value(
                     value=sib_name,
                     document_type="sib",
                     file_name=file_name,
-                    page=_get_page(f.get("ppr_name")),
+                    page=_get_page(f.get("ppr_name")) or _get_page(f.get("person_name")),
                 ),
                 valid_until=ExtractedField[str].from_value(
                     value=sib_valid,

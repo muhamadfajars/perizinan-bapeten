@@ -280,14 +280,15 @@ def test_cross_check_facility_labels_and_formulir_instansi():
         "Alamat Proyek : RS Tk. IV Pekanbaru, Jl. Kesehatan No. 2 , Kota Pekanbaru Riau"
     ]
     parsed = extract_form_data([], pages_text)
-    # Facility name must come from Instansi (institution_name)
-    assert parsed["hospital_name"]["value"] == "Rumkit Tentara Tk IV 01.07.04 Pekanbaru"
-    # Facility address must come from Alamat Proyek (project_address)
-    assert parsed["hospital_address"]["value"] == "RS Tk. IV Pekanbaru, Jl. Kesehatan No. 2 , Kota Pekanbaru Riau"
+    # Facility name must come from Alamat Proyek prefix (e.g. RS Tk. IV Pekanbaru)
+    assert parsed["hospital_name"]["value"] == "RS Tk. IV Pekanbaru"
+    # Facility address must come from Alamat Proyek suffix (e.g. Jl. Kesehatan No. 2 , Kota Pekanbaru Riau)
+    assert parsed["hospital_address"]["value"] == "Jl. Kesehatan No. 2 , Kota Pekanbaru Riau"
 
     app = build_application_from_form(parsed)
-    assert app.facility.project_name.value == "Rumkit Tentara Tk IV 01.07.04 Pekanbaru"
-    assert app.facility.project_address.value == "RS Tk. IV Pekanbaru, Jl. Kesehatan No. 2 , Kota Pekanbaru Riau"
+    assert app.facility.project_name.value == "RS Tk. IV Pekanbaru"
+    assert app.facility.project_address.value == "Jl. Kesehatan No. 2 , Kota Pekanbaru Riau"
+    assert app.facility.institution_name.value == "Rumkit Tentara Tk IV 01.07.04 Pekanbaru"
 
     # Cross check facility and check field labels
     extractions = {
@@ -546,6 +547,284 @@ def test_multi_equipment_consolidation_and_cross_check():
     assert report.xray_equipment[1].fields["unit_serial_number"].sources[0].value == "422867"
     assert len(report.xray_tubes[1].fields["tube_serial_number"].sources) == 1
     assert report.xray_tubes[1].fields["tube_serial_number"].sources[0].value == "4K0493"
+
+
+def test_cross_check_with_laporan_dosis_and_gedung_penahan_radiasi():
+    extractions = {
+        "formulir": [
+            {
+                "file_name": "formulir.pdf",
+                "fields": {
+                    "hospital_name": {"value": "RS. Hermina Kepanjen", "page": 1},
+                    "hospital_address": {"value": "Jalan Raya Mojosari, RT 02/RW 01, Kel. Mojosari, Kec. Kepanjen, Kab. Malang", "page": 1},
+                    "header": {
+                        "Alamat Proyek": "RS. Hermina Kepanjen, Jalan Raya Mojosari, RT 02/RW 01, Kel. Mojosari, Kec. Kepanjen, Kab. Malang",
+                    },
+                    "personnel_data": {
+                        "value": [
+                            {"name": "dr. Dhanti Erma Widiasi, Sp.Rad", "profession": "Dokter Spesialis Radiologi"},
+                            {"name": "Siti Azizah", "profession": "Radiografer"},
+                        ]
+                    },
+                },
+            }
+        ],
+        "laporan_dosis_awal": [
+            {
+                "file_name": "laporan_osl.pdf",
+                "fields": {
+                    "hospital_name": {"value": "Rumah Sakit Hermina Kepanjen", "page": 1},
+                    "hospital_address": {"value": "Jalan Raya Mojosari, RT. 02/ RW. 01, Kec. Kepanjen, Kab. Malang", "page": 1},
+                    "usage_period": {"value": "Oktober - Desember 2026", "page": 1},
+                    "person_name": {"value": "dr. Dhanti Erma Widiasi", "page": 1},
+                    "all_personnel": ["dr. Dhanti Erma Widiasi", "Siti Azizah", "Shofayana Wardatul Jamilah"],
+                },
+            }
+        ],
+        "gedung_penahan_radiasi": [
+            {
+                "file_name": "rencana_teknis.pdf",
+                "fields": {
+                    "hospital_name": {"value": "RS HERMINA KEPANJEN", "page": 2},
+                    "hospital_address": {"value": "Jl. Raya Mojosari RT 02/01, Kecamatan Kepanjen Kabupaten Malang", "page": 2},
+                },
+            }
+        ],
+    }
+
+    from src.extraction.entity_builder import consolidate_application
+    app = consolidate_application(extractions)
+
+    report = generate_cross_check_report(app, extractions, run_id="hermina_batch")
+
+    fac_name_sources = [s.document_type for s in report.facility.fields["project_name"].sources]
+    assert "formulir" in fac_name_sources
+    assert "laporan_dosis_awal" in fac_name_sources
+    assert "gedung_penahan_radiasi" in fac_name_sources
+    assert report.facility.fields["project_name"].status in (MatchingStatus.SESUAI, MatchingStatus.PERLU_REVIEW)
+
+    assert len(report.personnel) >= 1
+    doc_sources = [s.document_type for s in report.personnel[0].fields["person_name"].sources]
+    assert "laporan_dosis_awal" in doc_sources
+
+
+def test_dual_role_personnel_separation():
+    """Test that a person listed in both clinical personnel (e.g. Radiografer) and PPR
+
+    maintains their distinct identity in both sections without being erroneously merged
+    or filtered out.
+    """
+    from src.extraction.entity_builder import consolidate_application
+
+    extractions = {
+        "formulir": [
+            {
+                "file_name": "formulir.pdf",
+                "fields": {
+                    "hospital_name": {"value": "RS Medika Utama", "page": 1},
+                    "personnel_data": {
+                        "value": [
+                            {"name": "dr. SpRad Senior", "profession": "Dokter Spesialis Radiologi", "role": "Dokter Spesialis Radiologi"},
+                            {"name": "Budi Santoso", "profession": "Radiografer", "role": "Radiografer"},
+                            {"name": "Budi Santoso", "profession": "PPR Medik Tk. 2", "role": "PPR Medik Tk. 2"},
+                        ]
+                    },
+                },
+            }
+        ],
+        "sib": [
+            {
+                "file_name": "sib_budi.pdf",
+                "fields": {
+                    "person_name": {"value": "Budi Santoso", "page": 1},
+                    "certificate_number": {"value": "SIB-12345", "page": 1},
+                },
+            }
+        ],
+        "sprint": [
+            {
+                "file_name": "sprint_budi.pdf",
+                "fields": {
+                    "person_name": {"value": "Budi Santoso", "page": 1},
+                    "document_number": {"value": "SPRINT/001/2026", "page": 1},
+                },
+            }
+        ],
+    }
+
+    app = consolidate_application(extractions)
+
+    # 3 total entries in personnel list, 1 in PPR
+    assert len(app.personnel) == 3
+    assert len(app.ppr) == 1
+    assert app.ppr[0].name.value == "Budi Santoso"
+
+    report = generate_cross_check_report(app, extractions, run_id="dual_role_run")
+
+    # Ensure report has 3 personnel records and 1 PPR record
+    assert len(report.personnel) == 3
+    assert len(report.ppr) == 1
+
+    # Find the Radiografer record for Budi Santoso
+    radiographer_entry = next(
+        p for p in report.personnel
+        if p.fields["person_name"].sources
+        and p.fields["person_name"].sources[0].value == "Budi Santoso"
+        and any("Radiografer" in s.value for s in p.fields["profession"].sources)
+    )
+    assert radiographer_entry is not None
+
+    # Find the PPR entry
+    ppr_entry = report.ppr[0]
+    assert ppr_entry.fields["ppr_name"].sources[0].value == "Budi Santoso"
+    ppr_doc_types = [s.document_type for s in ppr_entry.fields["ppr_name"].sources]
+    assert "sib" in ppr_doc_types
+    assert "sprint" in ppr_doc_types
+
+    # Ensure radiographer entry does NOT get PPR SIB/Sprint sources contaminated
+    rad_doc_types = [s.document_type for s in radiographer_entry.fields["person_name"].sources]
+    assert "sib" not in rad_doc_types
+    assert "sprint" not in rad_doc_types
+
+
+def test_split_project_address_and_formulir_identity():
+    """Validates that Alamat Proyek is split into facility name prefix and address suffix
+    as required for BAPETEN permit evaluation.
+    """
+    from src.extraction.form_parser import split_project_address, extract_form_data, build_application_from_form
+
+    # 1. Hermina Kepanjen
+    raw_hermina = (
+        "RS. Hermina Kepanjen, Jalan Raya Mojosari , RT 02/RW 01, Kel. Mojosari,\n"
+        "Kec. Kepanjen , Kab. Malang, Jawa Timur"
+    )
+    name_h, addr_h = split_project_address(raw_hermina)
+    assert name_h == "RS. Hermina Kepanjen"
+    assert "Jalan Raya Mojosari" in addr_h
+    assert "Kec. Kepanjen" in addr_h
+
+    # 2. Rumah Sakit Jiwa Aceh
+    raw_aceh = (
+        "Rumah Sakit Jiwa Aceh, Jl. Dr. T. Syarief Thayeb No. 25 , Kota Banda Aceh "
+        "Aceh 23126, Telp.0651-32010, 0651-32020, Fax.0651-25857"
+    )
+    name_a, addr_a = split_project_address(raw_aceh)
+    assert name_a == "Rumah Sakit Jiwa Aceh"
+    assert addr_a.startswith("Jl. Dr. T. Syarief Thayeb No. 25")
+
+    # 3. Klinik Insan Utama Balikpapan
+    raw_balikpapan = (
+        "Klinik Insan Utama Balikpapan, Jl. Mayor TNI AD Ahmad Saili , Kota "
+        "Balikpapan Kalimantan Timur 76124, Telp.0857-5232-3293"
+    )
+    name_b, addr_b = split_project_address(raw_balikpapan)
+    assert name_b == "Klinik Insan Utama Balikpapan"
+    assert addr_b.startswith("Jl. Mayor TNI AD Ahmad Saili")
+
+    # 4. RS Tk. IV Pekanbaru
+    raw_pekanbaru = "RS Tk. IV Pekanbaru, Jl. Kesehatan No. 2 , Kota Pekanbaru Riau"
+    name_p, addr_p = split_project_address(raw_pekanbaru)
+    assert name_p == "RS Tk. IV Pekanbaru"
+    assert addr_p == "Jl. Kesehatan No. 2 , Kota Pekanbaru Riau"
+
+    # 5. Full extraction test verifying that formulir sets hospital_name to prefix and hospital_address to suffix
+    form_text = [
+        "Instansi : Medika Loka Kepanjen\n"
+        "Alamat Instansi : Medika Loka Kepanjen, Jalan Raya Mojosari , RT 02/RW 01, Kel. Mojosari, Kec. Kepanjen\n"
+        "Nama Proyek : Aktivitas Rumah Sakit Swasta\n"
+        "Alamat Proyek : RS. Hermina Kepanjen, Jalan Raya Mojosari , RT 02/RW 01, Kel. Mojosari,\n"
+        "Kec. Kepanjen , Kab. Malang, Jawa Timur\n"
+        "A. Kelengkapan Administrasi\n"
+    ]
+    parsed = extract_form_data([], form_text)
+    assert parsed["hospital_name"]["value"] == "RS. Hermina Kepanjen"
+    assert "Jalan Raya Mojosari" in parsed["hospital_address"]["value"]
+    assert "Kec. Kepanjen" in parsed["hospital_address"]["value"]
+
+    # Verify build_application_from_form preserves legal holding company in institution_name
+    app = build_application_from_form(parsed)
+    assert app.facility.project_name.value == "RS. Hermina Kepanjen"
+    assert "Jalan Raya Mojosari" in app.facility.project_address.value
+    assert app.facility.institution_name.value == "Medika Loka Kepanjen"
+
+
+def test_cross_check_homonym_personnel_with_ppr_and_radiographer():
+    """Test that two personnel with identical names (e.g. Siti Azizah as Radiografer
+
+    and Siti Azizah as PPR Medik Tk. 2) do not cross-contaminate SIP vs SIB credentials,
+    preventing false-positive critical discrepancies.
+    """
+    from src.extraction.entity_builder import consolidate_application
+
+    extractions = {
+        "formulir": [
+            {
+                "file_name": "formulir.pdf",
+                "fields": {
+                    "hospital_name": {"value": "RS Hermina Kepanjen", "page": 1},
+                    "personnel_data": {
+                        "value": [
+                            {"name": "dr. Dhanti Erma Widiasi, Sp.Rad", "profession": "Dokter Spesialis Radiologi", "role": "Dokter Spesialis Radiologi"},
+                            {"name": "Siti Azizah", "profession": "Radiografer", "role": "Radiografer"},
+                            {"name": "Shofayana Wardatul Jamilah", "profession": "Radiografer", "role": "Radiografer"},
+                            {"name": "Siti Azizah", "profession": "PPR Medik Tk. 2", "role": "PPR Medik Tk. 2"},
+                        ]
+                    },
+                },
+            }
+        ],
+        "sip": [
+            {
+                "file_name": "sip_siti_azizah.pdf",
+                "fields": {
+                    "person_name": {"value": "Siti Azizah", "page": 1},
+                    "profession": {"value": "Radiografer Level 5", "page": 1},
+                    "practice_location": {"value": "RS Hermina Kepanjen", "page": 1},
+                },
+            }
+        ],
+        "sib": [
+            {
+                "file_name": "sib_siti_azizah.pdf",
+                "fields": {
+                    "ppr_name": {"value": "Siti Azizah", "page": 1},
+                    "profession": {"value": "PPR Medik Tk. 2", "page": 1},
+                    "valid_until": {"value": "2028-12-31", "page": 1},
+                },
+            }
+        ],
+        "sprint": [
+            {
+                "file_name": "sprint_siti_azizah.pdf",
+                "fields": {
+                    "ppr_name": {"value": "Siti Azizah", "page": 1},
+                },
+            }
+        ],
+    }
+
+    app = consolidate_application(extractions)
+    assert len(app.personnel) == 4
+    assert len(app.ppr) == 1
+
+    report = generate_cross_check_report(app, extractions, run_id="hermina_siti_azizah_run")
+
+    # Personel #2 (Radiografer)
+    p2 = report.personnel[1]
+    assert p2.fields["person_name"].sources[0].value == "Siti Azizah"
+    assert p2.fields["profession"].status in (MatchingStatus.SESUAI, MatchingStatus.PERLU_REVIEW)
+
+    # Personel #4 (PPR Medik Tk. 2)
+    p4 = report.personnel[3]
+    assert p4.fields["person_name"].sources[0].value == "Siti Azizah"
+    # Crucial: p4 should NOT have failed against "Radiografer Level 5" from SIP
+    assert p4.fields["profession"].status != MatchingStatus.TIDAK_SESUAI
+    assert p4.fields["profession"].status in (MatchingStatus.SESUAI, MatchingStatus.PERLU_REVIEW)
+
+
+
+
+
 
 
 

@@ -4,9 +4,9 @@ Sistem cerdas untuk membantu evaluator BAPETEN melakukan **klasifikasi otomatis*
 
 ---
 
-## 📋 Cakupan Dokumen (15 Berkas Aktif)
+## 📋 Cakupan Dokumen (17 Berkas Aktif)
 
-Sistem mengidentifikasi dan memverifikasi silang 15 kelompok dokumen perizinan:
+Sistem mengidentifikasi dan memverifikasi silang 17 kelompok dokumen perizinan:
 
 1. **Formulir Permohonan** (Data instansi, unit, tabung, personel & PPR)
 2. **Surat Izin Praktik (SIP)** (Kualifikasi dokter spesialis radiologi & lokasi praktik)
@@ -23,12 +23,14 @@ Sistem mengidentifikasi dan memverifikasi silang 15 kelompok dokumen perizinan:
 13. **Hasil Uji Fungsi** (Pengujian operasional peralatan)
 14. **Persetujuan Impor** (Izin impor SRP BAPETEN multi-unit)
 15. **Uji Kesesuaian** (Sertifikat kelayakan operasi pesawat sinar-X)
+16. **Laporan Dosis Awal** (Pemantauan dosis radiasi perorangan / Lencana OSL: Instansi, Alamat, Periode, Petugas)
+17. **Rencana Teknis Bangunan Penahan Radiasi** (Desain proteksi ruang radiologi: Nama & Alamat Instansi)
 
 ---
 
 ## ✨ Fitur Unggulan
 
-- ⚡ **Batch Upload & Auto-Classification**: Evaluator dapat mengunggah berkas secara massal; sistem secara otomatis mengenali jenis berkas berdasarkan kata kunci dan pola konten (`classifier.py`).
+- ⚡ **Batch Upload & Auto-Classification**: Evaluator dapat mengunggah berkas secara massal; sistem secara otomatis mengenali 17 jenis berkas berdasarkan kata kunci dan pola konten (`classifier.py`).
 - 🔍 **Ekstraksi Hybrid & Multi-Engine**: Kombinasi teks digital presisi tinggi (PDF text & tabular extractor via `pdfplumber`/`pypdfium2`) dengan OCR cerdas (*image preprocessing* & engine OCR).
 - ✍️ **Deteksi & Crop Tanda Tangan Digital**: Otomatis mendeteksi, memotong (*crop*), dan menampilkan cuplikan tanda tangan pejabat pengesahan pada berkas Surat Perintah (Sprint).
 - 👥 **Pemisahan Kategori Personel Radiasi**: Memisahkan secara terstruktur antara *Data Petugas Lainnya yang Menangani SRP* (Dokter Spesialis Radiologi, Fisikawan Medik, Radiografer) dengan *Data Petugas Proteksi Radiasi (PPR)* beserta nomor SIB dan masa berlakunya.
@@ -67,7 +69,7 @@ Akses aplikasi melalui browser di `http://localhost:8501`.
 
 ## 🧪 Pengujian (Unit Tests)
 
-Sistem dilengkapi dengan 80 pengujian otomatis (*unit tests*) untuk memastikan akurasi ekstraksi dan verifikasi silang:
+Sistem dilengkapi dengan 83 pengujian otomatis (*unit tests*) untuk memastikan akurasi ekstraksi dan verifikasi silang:
 
 ```powershell
 pytest

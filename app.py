@@ -14,7 +14,7 @@ from src.pipeline import execute_run
 from src.storage.database import Database
 from src.extraction.classifier import classify_document
 from src.matching.normalizer import normalize_person_name
-from src.matching.cross_check_engine import evaluate_field_sources, SourceEvidence
+from src.matching.cross_check_engine import evaluate_field_sources, SourceEvidence, compare_two_values
 from src.extraction.signature_cropper import get_sprint_signature_preview
 
 # ═══════════════════════════════════════════════════════════════════
@@ -552,17 +552,548 @@ def _render_pill(status_str):
     if s == "SESUAI":
         return '<span class="pill pill-match">✓ Sesuai</span>'
     elif s in {"PERLU REVIEW", "WARNING"}:
-        return f'<span class="pill pill-review">⚠ {s.title()}</span>'
+        return '<span class="pill pill-review">⚠ Perlu Review</span>'
     elif s == "TIDAK SESUAI":
         return '<span class="pill pill-fail">✗ Tidak Sesuai</span>'
-    elif s == "TIDAK DITEMUKAN":
-        return '<span class="pill pill-missing">○ Belum Ada</span>'
-    return f'<span class="pill pill-missing">{s}</span>'
+    elif s in {"TIDAK DITEMUKAN", "BELUM DIUNGGAH", "BELUM ADA"}:
+        return '<span class="pill pill-missing">○ Belum Diunggah</span>'
+    return f'<span class="pill pill-missing">○ {s.title()}</span>'
 
 
-def _render_parameter_card(category_label, field_title, fv, docs_map):
-    """Renders a separated, card-based parameter breakdown with status badge, notes, and clean source table."""
-    sources = fv.get("sources", [])
+# ─────────────────────────────────────────────────────────────
+# STANDAR DOKUMEN PERSYARATAN REGULASI BAPETEN
+# ─────────────────────────────────────────────────────────────
+FACILITY_NAME_EXPECTED_DOCS = [
+    {
+        "doc_type": "formulir",
+        "label": "Formulir Permohonan",
+        "desc": "Tabel A Data Umum Pemohon / Pemegang Izin",
+        "required": True,
+    },
+    {
+        "doc_type": "sprint",
+        "label": "Surat Perintah (Sprint)",
+        "desc": "Kop & Identitas Rumah Sakit Penerbit Sprint",
+        "required": True,
+    },
+    {
+        "doc_type": "ppkr",
+        "label": "Dokumen PPKR",
+        "desc": "Dokumen Program Proteksi & Keselamatan Radiasi",
+        "required": True,
+    },
+    {
+        "doc_type": "uji_kesesuaian",
+        "label": "Laporan Uji Kesesuaian",
+        "desc": "Nama Fasilitas pada Sertifikat Uji Kesesuaian",
+        "required": True,
+    },
+    {
+        "doc_type": "tld",
+        "label": "Surat Pengiriman TLD",
+        "desc": "Nama Instansi Pemakai Dosimeter Personal",
+        "required": False,
+    },
+    {
+        "doc_type": "uji_fungsi",
+        "label": "Laporan Uji Fungsi",
+        "desc": "Berita Acara Pengujian Fungsi Lapangan",
+        "required": False,
+    },
+    {
+        "doc_type": "paparan_radiasi",
+        "label": "Pengukuran Paparan",
+        "desc": "Laporan Pengukuran Tingkat Paparan Ruangan",
+        "required": False,
+    },
+    {
+        "doc_type": "sistem_manajemen",
+        "label": "Dokumen Sistem Manajemen",
+        "desc": "Sistem Manajemen Fasilitas Radiologi",
+        "required": False,
+    },
+    {
+        "doc_type": "program_perawatan",
+        "label": "Program Perawatan Alat",
+        "desc": "Dokumen Program Perawatan Pesawat Sinar-X",
+        "required": False,
+    },
+    {
+        "doc_type": "laporan_dosis_awal",
+        "label": "Laporan Dosis Awal",
+        "desc": "Evaluasi Dosis Pasien Awal Radiologi",
+        "required": False,
+    },
+    {
+        "doc_type": "gedung_penahan_radiasi",
+        "label": "Gedung Penahan Radiasi",
+        "desc": "Rencana Teknis Bangunan Penahan Radiasi",
+        "required": False,
+    },
+]
+
+FACILITY_ADDRESS_EXPECTED_DOCS = [
+    {
+        "doc_type": "formulir",
+        "label": "Formulir Permohonan",
+        "desc": "Alamat Lokasi Pemanfaatan / Instalasi Radiologi",
+        "required": True,
+    },
+    {
+        "doc_type": "sprint",
+        "label": "Surat Perintah (Sprint)",
+        "desc": "Alamat Instansi pada Kop / Isi Surat Penugasan",
+        "required": True,
+    },
+    {
+        "doc_type": "ppkr",
+        "label": "Dokumen PPKR",
+        "desc": "Alamat Lokasi pada Dokumen PPKR",
+        "required": True,
+    },
+    {
+        "doc_type": "uji_kesesuaian",
+        "label": "Laporan Uji Kesesuaian",
+        "desc": "Alamat Fasilitas pada Laporan Uji Kesesuaian",
+        "required": True,
+    },
+    {
+        "doc_type": "tld",
+        "label": "Surat Pengiriman TLD",
+        "desc": "Alamat Pengiriman Dosimeter Personal RS",
+        "required": False,
+    },
+    {
+        "doc_type": "uji_fungsi",
+        "label": "Laporan Uji Fungsi",
+        "desc": "Alamat Pengujian Lapangan Pesawat Sinar-X",
+        "required": False,
+    },
+    {
+        "doc_type": "paparan_radiasi",
+        "label": "Pengukuran Paparan",
+        "desc": "Alamat Fasilitas pada Laporan Paparan Radiasi",
+        "required": False,
+    },
+    {
+        "doc_type": "sistem_manajemen",
+        "label": "Dokumen Sistem Manajemen",
+        "desc": "Alamat Fasilitas pada Sistem Manajemen",
+        "required": False,
+    },
+    {
+        "doc_type": "program_perawatan",
+        "label": "Program Perawatan Alat",
+        "desc": "Alamat Fasilitas pada Dokumen Perawatan",
+        "required": False,
+    },
+    {
+        "doc_type": "gedung_penahan_radiasi",
+        "label": "Gedung Penahan Radiasi",
+        "desc": "Alamat Lokasi Gedung / Ruangan Radiologi",
+        "required": False,
+    },
+]
+
+PERSONNEL_NAME_EXPECTED_DOCS = [
+    {
+        "doc_type": "formulir",
+        "label": "Formulir Permohonan",
+        "desc": "Tabel B.1 Data Petugas Lainnya",
+        "required": True,
+    },
+    {
+        "doc_type": "sip",
+        "label": "Surat Izin Praktik (SIP)",
+        "desc": "Kredensial Izin Resmi Tenaga Medis",
+        "required": True,
+    },
+    {
+        "doc_type": "tld",
+        "label": "Surat Pengiriman TLD",
+        "desc": "Pemantauan Dosis Radiasi Perorangan",
+        "required": False,
+    },
+    {
+        "doc_type": "laporan_dosis_awal",
+        "label": "Laporan Dosis Awal",
+        "desc": "Evaluasi Pemantauan Dosis BPFK / Lab",
+        "required": False,
+    },
+    {
+        "doc_type": "ppkr",
+        "label": "Dokumen PPKR",
+        "desc": "Struktur Ketenagaan Proteksi Radiasi",
+        "required": False,
+    },
+]
+
+PERSONNEL_PROFESSION_EXPECTED_DOCS = [
+    {
+        "doc_type": "formulir",
+        "label": "Formulir Permohonan",
+        "desc": "Tabel B.1 Usulan Profesi Pemohon",
+        "required": True,
+    },
+    {
+        "doc_type": "sip",
+        "label": "Surat Izin Praktik (SIP)",
+        "desc": "Kualifikasi / Profesi Tertera pada SIP",
+        "required": True,
+    },
+    {
+        "doc_type": "ppkr",
+        "label": "Dokumen PPKR",
+        "desc": "Uraian Tugas & Ketenagaan PPKR",
+        "required": False,
+    },
+]
+
+PPR_NAME_EXPECTED_DOCS = [
+    {
+        "doc_type": "formulir",
+        "label": "Formulir Permohonan",
+        "desc": "Tabel B.2 Usulan Petugas Proteksi Radiasi",
+        "required": True,
+    },
+    {
+        "doc_type": "sib",
+        "label": "Surat Izin Bekerja (SIB)",
+        "desc": "Lisensi Kualifikasi Resmi BAPETEN",
+        "required": True,
+    },
+    {
+        "doc_type": "sprint",
+        "label": "Surat Perintah (Sprint)",
+        "desc": "SK Penunjukan Resmi Direktur Faskes",
+        "required": True,
+    },
+    {
+        "doc_type": "ppkr",
+        "label": "Dokumen PPKR",
+        "desc": "Struktur Organisasi Proteksi Radiasi",
+        "required": False,
+    },
+    {
+        "doc_type": "pemantauan_dosis",
+        "alt_doc_types": ["tld", "laporan_dosis_awal"],
+        "label": "Pemantauan Dosis (TLD / OSL)",
+        "desc": "Proteksi & Pemantauan Dosis PPR",
+        "required": False,
+    },
+]
+
+PPR_SIB_EXPECTED_DOCS = [
+    {
+        "doc_type": "sib",
+        "label": "Surat Izin Bekerja (SIB)",
+        "desc": "Lisensi Kualifikasi Resmi BAPETEN",
+        "required": True,
+    },
+]
+
+# ─────────────────────────────────────────────────────────────
+# STANDAR DOKUMEN PERSYARATAN PESAWAT & TABUNG SINAR-X
+# ─────────────────────────────────────────────────────────────
+XRAY_UNIT_BRAND_EXPECTED_DOCS = [
+    {
+        "doc_type": "formulir",
+        "label": "Formulir Permohonan",
+        "desc": "Tabel C.1 Data Teknis Pesawat Sinar-X",
+        "required": True,
+    },
+    {
+        "doc_type": "spesifikasi_pesawat",
+        "label": "Spesifikasi Pesawat",
+        "desc": "Brosur Teknis Resmi dari Pabrikan Unit",
+        "required": False,
+    },
+    {
+        "doc_type": "ppkr",
+        "label": "Dokumen PPKR",
+        "desc": "Daftar Inventaris Peralatan Radiasi",
+        "required": False,
+    },
+    {
+        "doc_type": "label_unit",
+        "label": "Foto Label Unit",
+        "desc": "Plat Fisik Identitas Unit Pabrikan",
+        "required": True,
+    },
+    {
+        "doc_type": "persetujuan_import",
+        "label": "Persetujuan Impor",
+        "desc": "Izin Pemasukan Resmi dari BAPETEN",
+        "required": False,
+    },
+    {
+        "doc_type": "uji_kesesuaian",
+        "label": "Laporan Uji Kesesuaian",
+        "desc": "Sertifikat Kelaikan Operasional Unit",
+        "required": True,
+    },
+    {
+        "doc_type": "uji_fungsi",
+        "label": "Laporan Uji Fungsi",
+        "desc": "Berita Acara Pengujian Fungsi Lapangan",
+        "required": False,
+    },
+    {
+        "doc_type": "paparan_radiasi",
+        "label": "Pengukuran Paparan",
+        "desc": "Laporan Proteksi & Paparan Ruangan",
+        "required": False,
+    },
+]
+
+XRAY_UNIT_TYPE_EXPECTED_DOCS = [
+    {
+        "doc_type": "formulir",
+        "label": "Formulir Permohonan",
+        "desc": "Tabel C.1 Tipe / Model Usulan",
+        "required": True,
+    },
+    {
+        "doc_type": "spesifikasi_pesawat",
+        "label": "Spesifikasi Pesawat",
+        "desc": "Tipe / Model pada Brosur Resmi Pabrikan",
+        "required": False,
+    },
+    {
+        "doc_type": "ppkr",
+        "label": "Dokumen PPKR",
+        "desc": "Tipe / Model pada Inventaris PPKR",
+        "required": False,
+    },
+    {
+        "doc_type": "label_unit",
+        "label": "Foto Label Unit",
+        "desc": "Tipe / Model pada Plat Fisik Unit",
+        "required": True,
+    },
+    {
+        "doc_type": "persetujuan_import",
+        "label": "Persetujuan Impor",
+        "desc": "Tipe / Model pada Izin Impor Resmi",
+        "required": False,
+    },
+    {
+        "doc_type": "uji_kesesuaian",
+        "label": "Laporan Uji Kesesuaian",
+        "desc": "Tipe / Model pada Laporan Uji Kesesuaian",
+        "required": True,
+    },
+    {
+        "doc_type": "uji_fungsi",
+        "label": "Laporan Uji Fungsi",
+        "desc": "Tipe / Model pada Berita Acara Uji Fungsi",
+        "required": False,
+    },
+    {
+        "doc_type": "paparan_radiasi",
+        "label": "Pengukuran Paparan",
+        "desc": "Tipe / Model pada Lembar Paparan Radiasi",
+        "required": False,
+    },
+]
+
+XRAY_UNIT_SERIAL_EXPECTED_DOCS = [
+    {
+        "doc_type": "formulir",
+        "label": "Formulir Permohonan",
+        "desc": "Tabel C.1 Nomor Seri Unit Acuan",
+        "required": True,
+    },
+    {
+        "doc_type": "label_unit",
+        "label": "Foto Label Unit",
+        "desc": "Nomor Seri pada Plat Fisik Unit",
+        "required": True,
+    },
+    {
+        "doc_type": "uji_kesesuaian",
+        "label": "Laporan Uji Kesesuaian",
+        "desc": "Nomor Seri pada Laporan Uji Kesesuaian",
+        "required": True,
+    },
+    {
+        "doc_type": "persetujuan_import",
+        "label": "Persetujuan Impor",
+        "desc": "Nomor Seri pada Izin Impor Resmi",
+        "required": False,
+    },
+    {
+        "doc_type": "ppkr",
+        "label": "Dokumen PPKR",
+        "desc": "Nomor Seri pada Inventaris PPKR",
+        "required": False,
+    },
+    {
+        "doc_type": "uji_fungsi",
+        "label": "Laporan Uji Fungsi",
+        "desc": "Nomor Seri pada Uji Fungsi Lapangan",
+        "required": False,
+    },
+    {
+        "doc_type": "paparan_radiasi",
+        "label": "Pengukuran Paparan",
+        "desc": "Nomor Seri pada Lembar Paparan Radiasi",
+        "required": False,
+    },
+]
+
+XRAY_TUBE_BRAND_EXPECTED_DOCS = [
+    {
+        "doc_type": "formulir",
+        "label": "Formulir Permohonan",
+        "desc": "Tabel C.2 Data Teknis Tabung Sinar-X",
+        "required": True,
+    },
+    {
+        "doc_type": "label_tabung",
+        "label": "Foto Label Tabung",
+        "desc": "Plat Fisik Identitas Tabung / Housing",
+        "required": True,
+    },
+    {
+        "doc_type": "uji_kesesuaian",
+        "label": "Laporan Uji Kesesuaian",
+        "desc": "Merk Tabung pada Uji Kesesuaian",
+        "required": True,
+    },
+    {
+        "doc_type": "ppkr",
+        "label": "Dokumen PPKR",
+        "desc": "Merk Tabung pada Inventaris PPKR",
+        "required": False,
+    },
+    {
+        "doc_type": "persetujuan_import",
+        "label": "Persetujuan Impor",
+        "desc": "Merk Tabung pada Izin Impor Resmi",
+        "required": False,
+    },
+    {
+        "doc_type": "uji_fungsi",
+        "label": "Laporan Uji Fungsi",
+        "desc": "Merk Tabung pada Laporan Uji Fungsi",
+        "required": False,
+    },
+    {
+        "doc_type": "paparan_radiasi",
+        "label": "Pengukuran Paparan",
+        "desc": "Merk Tabung pada Lembar Paparan Radiasi",
+        "required": False,
+    },
+]
+
+XRAY_TUBE_TYPE_EXPECTED_DOCS = [
+    {
+        "doc_type": "formulir",
+        "label": "Formulir Permohonan",
+        "desc": "Tabel C.2 Tipe / Model Tabung",
+        "required": True,
+    },
+    {
+        "doc_type": "label_tabung",
+        "label": "Foto Label Tabung",
+        "desc": "Model Unit / Housing / Insert Tabung",
+        "required": True,
+    },
+    {
+        "doc_type": "uji_kesesuaian",
+        "label": "Laporan Uji Kesesuaian",
+        "desc": "Tipe / Model Tabung pada Uji Kesesuaian",
+        "required": True,
+    },
+    {
+        "doc_type": "ppkr",
+        "label": "Dokumen PPKR",
+        "desc": "Tipe / Model Tabung pada PPKR",
+        "required": False,
+    },
+    {
+        "doc_type": "persetujuan_import",
+        "label": "Persetujuan Impor",
+        "desc": "Tipe / Model Tabung pada Izin Impor",
+        "required": False,
+    },
+    {
+        "doc_type": "uji_fungsi",
+        "label": "Laporan Uji Fungsi",
+        "desc": "Tipe / Model Tabung pada Uji Fungsi",
+        "required": False,
+    },
+    {
+        "doc_type": "paparan_radiasi",
+        "label": "Pengukuran Paparan",
+        "desc": "Tipe / Model Tabung pada Paparan Radiasi",
+        "required": False,
+    },
+]
+
+XRAY_TUBE_SERIAL_EXPECTED_DOCS = [
+    {
+        "doc_type": "formulir",
+        "label": "Formulir Permohonan",
+        "desc": "Tabel C.2 Nomor Seri Tabung Acuan",
+        "required": True,
+    },
+    {
+        "doc_type": "label_tabung",
+        "label": "Foto Label Tabung",
+        "desc": "Nomor Seri pada Plat Fisik Tabung",
+        "required": True,
+    },
+    {
+        "doc_type": "uji_kesesuaian",
+        "label": "Laporan Uji Kesesuaian",
+        "desc": "Nomor Seri Tabung pada Uji Kesesuaian",
+        "required": True,
+    },
+    {
+        "doc_type": "ppkr",
+        "label": "Dokumen PPKR",
+        "desc": "Nomor Seri Tabung pada PPKR",
+        "required": False,
+    },
+    {
+        "doc_type": "persetujuan_import",
+        "label": "Persetujuan Impor",
+        "desc": "Nomor Seri Tabung pada Izin Impor",
+        "required": False,
+    },
+    {
+        "doc_type": "uji_fungsi",
+        "label": "Laporan Uji Fungsi",
+        "desc": "Nomor Seri Tabung pada Uji Fungsi",
+        "required": False,
+    },
+    {
+        "doc_type": "paparan_radiasi",
+        "label": "Pengukuran Paparan",
+        "desc": "Nomor Seri Tabung pada Paparan Radiasi",
+        "required": False,
+    },
+]
+
+
+def _safe_page_int(pg):
+    """Safely extracts integer page number for SourceEvidence Pydantic validation."""
+    if isinstance(pg, int):
+        return pg
+    if not pg:
+        return None
+    s = str(pg).strip()
+    digits = re.findall(r"\d+", s)
+    return int(digits[0]) if digits else None
+
+
+def _render_parameter_card(category_label, field_title, fv, docs_map, expected_docs=None):
+    """Renders a separated, card-based parameter breakdown with status badge, notes, and side-by-side value comparison table.
+    When expected_docs is provided, all regulatory requirement documents are listed with their extracted values or missing status.
+    """
+    sources = fv.get("sources", []) if fv else []
     
     clean_sources = []
     for s in sources:
@@ -583,44 +1114,89 @@ def _render_parameter_card(category_label, field_title, fv, docs_map):
         })
 
     # Dynamically evaluate status and reason with smart tolerance
-    fstatus = _clean_status_str(fv.get("status", "SESUAI"))
-    reason_msg = fv.get("reason", "")
+    fstatus = _clean_status_str(fv.get("status", "SESUAI") if fv else "SESUAI")
+    reason_msg = fv.get("reason", "") if fv else ""
 
-    # For hospital name, address, or personnel name, dynamically compute tolerance-based cross check
-    if "Nama Rumah Sakit" in field_title or fv.get("field_key") == "project_name":
-        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=s["page"]) for s in clean_sources if s["value"] not in ("—", "")]
+    # For hospital name, address, personnel name, equipment brand, or serial number, dynamically compute tolerance-based cross check
+    if "Nama Rumah Sakit" in field_title or (fv and fv.get("field_key") == "project_name"):
+        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=_safe_page_int(s.get("page"))) for s in clean_sources if s["value"] not in ("—", "")]
         if len(ev) > 1:
             check_res = evaluate_field_sources("project_name", "Nama instansi", ev, mode="facility_name")
             fstatus = _clean_status_str(check_res.status)
             reason_msg = check_res.reason
-    elif "Alamat" in field_title or fv.get("field_key") == "project_address":
-        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=s["page"]) for s in clean_sources if s["value"] not in ("—", "")]
+    elif "Alamat" in field_title or (fv and fv.get("field_key") == "project_address"):
+        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=_safe_page_int(s.get("page"))) for s in clean_sources if s["value"] not in ("—", "")]
         if len(ev) > 1:
             check_res = evaluate_field_sources("project_address", "Alamat instansi", ev, mode="fuzzy_address")
             fstatus = _clean_status_str(check_res.status)
             reason_msg = check_res.reason
-    elif fv.get("field_key") in {"person_name", "ppr_name"} or "Nama Personel" in field_title or "Nama Petugas" in field_title:
-        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=s["page"]) for s in clean_sources if s["value"] not in ("—", "")]
+    elif (fv and fv.get("field_key") in {"person_name", "ppr_name"}) or "Nama Personel" in field_title or "Nama Petugas" in field_title or "Nama PPR" in field_title:
+        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=_safe_page_int(s.get("page"))) for s in clean_sources if s["value"] not in ("—", "")]
         if len(ev) > 1:
-            check_res = evaluate_field_sources(fv.get("field_key") or "person_name", field_title, ev, mode="fuzzy_name")
+            fkey = (fv.get("field_key") if fv else None) or "person_name"
+            check_res = evaluate_field_sources(fkey, field_title, ev, mode="fuzzy_name")
+            fstatus = _clean_status_str(check_res.status)
+            reason_msg = check_res.reason
+    elif (fv and fv.get("field_key") in {"unit_serial_number", "tube_serial_number"}) or "Nomor Seri" in field_title:
+        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=_safe_page_int(s.get("page"))) for s in clean_sources if s["value"] not in ("—", "")]
+        if len(ev) > 1:
+            fkey = (fv.get("field_key") if fv else None) or "serial_number"
+            check_res = evaluate_field_sources(fkey, field_title, ev, mode="serial")
+            fstatus = _clean_status_str(check_res.status)
+            reason_msg = check_res.reason
+    elif (fv and fv.get("field_key") in {"unit_brand", "tube_brand"}) or "Merk" in field_title:
+        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=_safe_page_int(s.get("page"))) for s in clean_sources if s["value"] not in ("—", "")]
+        if len(ev) > 1:
+            fkey = (fv.get("field_key") if fv else None) or "brand"
+            check_res = evaluate_field_sources(fkey, field_title, ev, mode="brand")
             fstatus = _clean_status_str(check_res.status)
             reason_msg = check_res.reason
     else:
         if reason_msg:
             reason_msg = re.sub(r"\s*(?:Tube(?:\s+tilt)?|Collimator(?:\s+Rotation)?)\s*PASS\b", "", reason_msg, flags=re.I)
 
-    badge_html = _render_pill(fstatus)
-    if fstatus == "TIDAK DITEMUKAN" and len(clean_sources) == 1:
-        badge_html = '<span class="pill pill-review" style="background:rgba(148, 163, 184, 0.12); color:#94a3b8; border:1px solid rgba(148, 163, 184, 0.25);">○ 1 Dokumen Terdaftar</span>'
-        if not reason_msg or "Data hanya ditemukan pada 1 dokumen" in reason_msg:
-            reason_msg = f"Data tercantum pada {clean_sources[0]['display_name']}, belum ada berkas pembanding lain yang diunggah."
+    if not clean_sources:
+        has_any_uploaded = False
+        if expected_docs:
+            for exp in expected_docs:
+                dt = exp.get("doc_type")
+                alts = exp.get("alt_doc_types", [])
+                m_types = [dt] + alts if alts else [dt]
+                for mt in m_types:
+                    if docs_map.get(mt):
+                        has_any_uploaded = True
+                        break
+                if has_any_uploaded:
+                    break
+        if has_any_uploaded:
+            fstatus = "PERLU REVIEW"
+            badge_html = '<span class="pill pill-review">⚠ Perlu Review</span>'
+            if not reason_msg:
+                reason_msg = "Berkas persyaratan terunggah namun nilai parameter belum terdeteksi."
+        else:
+            fstatus = "TIDAK DITEMUKAN"
+            badge_html = '<span class="pill pill-missing">○ Belum Diunggah</span>'
+            if not reason_msg:
+                reason_msg = "Dokumen persyaratan untuk parameter ini belum diunggah."
+    else:
+        badge_html = _render_pill(fstatus)
+        if fstatus == "TIDAK DITEMUKAN" and len(clean_sources) == 1:
+            badge_html = '<span class="pill pill-review">⚠ Perlu Review</span>'
+            if not reason_msg or "Data hanya ditemukan pada 1 dokumen" in reason_msg:
+                reason_msg = f"Data tercantum pada {clean_sources[0]['display_name']}, belum ada berkas pembanding lain yang diunggah."
+
+    # Theme accent: purple for Tabung & PPR, cyan/blue for Pesawat Unit & clinical personnel & general
+    is_purple_theme = "Tabung" in category_label or "Tabung" in field_title or "PPR" in category_label or "PPR" in field_title
+    border_color = "rgba(168, 85, 247, 0.25)" if is_purple_theme else "rgba(56, 189, 248, 0.22)"
+    category_color = "#c084fc" if is_purple_theme else "#38bdf8"
+    tag_color = "#c084fc" if is_purple_theme else "#38bdf8"
 
     card_html = f"""
-    <div style="background:#0f172a; border:1px solid var(--border-subtle); border-radius:12px; padding:1.2rem; margin-bottom:1.2rem;">
+    <div style="background:#0f172a; border:1px solid {border_color}; border-radius:12px; padding:1.2rem; margin-bottom:1.2rem;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.8rem;">
             <div>
-                <span style="font-size:0.75rem; text-transform:uppercase; color:#38bdf8; font-weight:700;">{category_label}</span>
-                <h4 style="margin:0.2rem 0 0 0; font-size:1.1rem; font-weight:800;">{field_title}</h4>
+                <span style="font-size:0.75rem; text-transform:uppercase; color:{category_color}; font-weight:700;">{category_label}</span>
+                <h4 style="margin:0.2rem 0 0 0; font-size:1.1rem; font-weight:800; color:#f8fafc;">{field_title}</h4>
             </div>
             <div>{badge_html}</div>
         </div>
@@ -632,53 +1208,282 @@ def _render_parameter_card(category_label, field_title, fv, docs_map):
             {reason_msg}
         </div>
         """
-        
-    if clean_sources:
-        t_rows = ""
+
+    if expected_docs:
+        # 4-COLUMN INTEGRATED REGULATORY MATRIX & VALUE COMPARISON TABLE
+        rows = []
+        used_indices = set()
+
+        # Find reference value for comparison (prioritize formulir, else first available)
+        ref_val = ""
         for s in clean_sources:
-            page_info = f" (Hal. {s['page']})" if s.get('page') not in (None, "-", "") else ""
-            t_rows += f"<tr><td style='font-weight:700; color:#38bdf8; width:35%;'>{s['display_name']}</td><td style='font-weight:600; width:35%;'>{s['value']}</td><td style='color:#64748b; width:30%;'>{s['document_name']}{page_info}</td></tr>"
-        
+            if s["document_type"] == "formulir" and s["value"] not in ("—", ""):
+                ref_val = s["value"]
+                break
+        if not ref_val and clean_sources:
+            for s in clean_sources:
+                if s["value"] not in ("—", ""):
+                    ref_val = s["value"]
+                    break
+
+        # Determine comparison mode
+        if (fv and fv.get("field_key") in {"unit_serial_number", "tube_serial_number"}) or "Nomor Seri" in field_title:
+            comp_mode = "serial"
+        elif (fv and fv.get("field_key") in {"unit_brand", "tube_brand"}) or "Merk" in field_title:
+            comp_mode = "brand"
+        elif "Nama Rumah Sakit" in field_title or (fv and fv.get("field_key") == "project_name"):
+            comp_mode = "facility_name"
+        elif "Alamat" in field_title or (fv and fv.get("field_key") == "project_address"):
+            comp_mode = "fuzzy_address"
+        elif "Nama" in field_title or (fv and fv.get("field_key") in {"person_name", "ppr_name"}):
+            comp_mode = "fuzzy_name"
+        else:
+            comp_mode = "fuzzy_text"
+
+        for exp in expected_docs:
+            doc_type = exp.get("doc_type")
+            alt_types = exp.get("alt_doc_types", [])
+            match_types = [doc_type] + alt_types if alt_types else [doc_type]
+            label = exp.get("label") or DOCUMENT_TYPES.get(doc_type, {}).get("name", doc_type.replace("_", " ").title())
+            desc = exp.get("desc", "")
+            is_req = exp.get("required", True)
+
+            matched_s = None
+            for idx_s, s in enumerate(clean_sources):
+                if idx_s not in used_indices and s["document_type"] in match_types:
+                    matched_s = s
+                    used_indices.add(idx_s)
+                    break
+
+            if matched_s:
+                v_str = matched_s["value"]
+                pg = matched_s.get("page")
+                pg_str = f" (Hal. {pg})" if pg not in (None, "-", "") else ""
+                file_str = f"{matched_s['document_name']}{pg_str}"
+
+                # Calculate individual row badge and secondary explanatory subtext
+                val_subtext = ""
+                if matched_s["document_type"] == "formulir":
+                    row_badge = '<span class="pill pill-match">✓ Sesuai</span>'
+                elif "valid_until" in field_title.lower() or (fv and fv.get("field_key") == "valid_until"):
+                    v_clean_st = _clean_status_str(fv.get("status", "SESUAI") if fv else "SESUAI")
+                    if v_clean_st == "TIDAK SESUAI":
+                        row_badge = '<span class="pill pill-fail">✗ Tidak Sesuai</span>'
+                        val_subtext = "<div style='font-size:0.72rem; color:#fca5a5; margin-top:2px;'>Masa berlaku telah berakhir (kedaluwarsa)</div>"
+                    elif v_clean_st in {"PERLU REVIEW", "WARNING"}:
+                        row_badge = '<span class="pill pill-review">⚠ Perlu Review</span>'
+                        val_subtext = "<div style='font-size:0.72rem; color:#fde68a; margin-top:2px;'>Perlu konfirmasi masa berlaku</div>"
+                    else:
+                        row_badge = '<span class="pill pill-match">✓ Sesuai</span>'
+                        val_subtext = "<div style='font-size:0.72rem; color:#6ee7b7; margin-top:2px;'>Masa berlaku aktif</div>"
+                else:
+                    if ref_val and v_str not in ("—", ""):
+                        sc, st_c, exp_reason = compare_two_values(ref_val, v_str, mode=comp_mode)
+                        st_name = _clean_status_str(st_c)
+                        if st_name == "SESUAI":
+                            row_badge = '<span class="pill pill-match">✓ Sesuai</span>'
+                        elif st_name in {"PERLU REVIEW", "WARNING"}:
+                            row_badge = '<span class="pill pill-review">⚠ Perlu Review</span>'
+                            if exp_reason and exp_reason not in ("Nilai sesuai", "Nomor seri identik", "Merk sesuai", "Nama personel sesuai", "Nama fasilitas sesuai", "Alamat sesuai sempurna"):
+                                val_subtext = f"<div style='font-size:0.72rem; color:#fde68a; margin-top:2px;'>{exp_reason}</div>"
+                        else:
+                            row_badge = '<span class="pill pill-fail">✗ Tidak Sesuai</span>'
+                            if exp_reason and exp_reason not in ("Nilai sesuai", "Nomor seri identik", "Merk sesuai"):
+                                val_subtext = f"<div style='font-size:0.72rem; color:#fca5a5; margin-top:2px;'>{exp_reason}</div>"
+                    else:
+                        row_badge = '<span class="pill pill-match">✓ Sesuai</span>'
+
+                rows.append({
+                    "label": label,
+                    "desc": desc,
+                    "val_html": f"<strong style='color:#f8fafc;'>{v_str}</strong>{val_subtext}",
+                    "file_html": file_str,
+                    "badge": row_badge,
+                })
+            else:
+                # Not matched in extraction sources
+                uploaded_files = []
+                for t in match_types:
+                    if docs_map.get(t):
+                        uploaded_files.extend(docs_map.get(t))
+
+                if uploaded_files:
+                    # File uploaded, but value not matched
+                    f_list = ", ".join(uploaded_files)
+                    if "Nomor Seri" in field_title or (fv and fv.get("field_key") in {"unit_serial_number", "tube_serial_number"}):
+                        missing_msg = "Nomor seri tidak ditemukan dalam berkas"
+                    elif "Merk" in field_title or (fv and fv.get("field_key") in {"unit_brand", "tube_brand"}):
+                        missing_msg = "Merk tidak terdeteksi dalam berkas"
+                    elif "Tipe" in field_title or "Model" in field_title:
+                        missing_msg = "Tipe/model tidak terdeteksi dalam berkas"
+                    elif "Profesi" in field_title:
+                        missing_msg = "Profesi tidak terdeteksi dalam berkas"
+                    elif "Nama Rumah Sakit" in field_title or (fv and fv.get("field_key") == "project_name"):
+                        missing_msg = "Nama rumah sakit tidak terdeteksi dalam berkas"
+                    elif "Alamat" in field_title or (fv and fv.get("field_key") == "project_address"):
+                        missing_msg = "Alamat tidak terdeteksi dalam berkas"
+                    else:
+                        missing_msg = "Data tidak terdaftar dalam berkas"
+
+                    rows.append({
+                        "label": label,
+                        "desc": desc,
+                        "val_html": f"<span style='color:#fde68a; font-style:italic;'>— ({missing_msg})</span>",
+                        "file_html": f_list,
+                        "badge": '<span class="pill pill-review">⚠ Perlu Review</span>',
+                    })
+                else:
+                    # File not uploaded
+                    req_label = "Wajib Regulasi" if is_req else "Dokumen Pendukung"
+                    rows.append({
+                        "label": label,
+                        "desc": desc,
+                        "val_html": f"<span style='color:#64748b; font-style:italic;'>— (Berkas belum diunggah · {req_label})</span>",
+                        "file_html": "—",
+                        "badge": '<span class="pill pill-missing">○ Belum Diunggah</span>',
+                    })
+
+        # Append any extra clean_sources not covered in expected_docs
+        for idx_s, s in enumerate(clean_sources):
+            if idx_s not in used_indices:
+                pg = s.get("page")
+                pg_str = f" (Hal. {pg})" if pg not in (None, "-", "") else ""
+                rows.append({
+                    "label": s["display_name"],
+                    "desc": "Dokumen Terunggah Tambahan",
+                    "val_html": f"<strong style='color:#f8fafc;'>{s['value']}</strong>",
+                    "file_html": f"{s['document_name']}{pg_str}",
+                    "badge": '<span class="pill pill-match">✓ Sesuai</span>',
+                })
+
+        t_rows = ""
+        for r in rows:
+            desc_html = f"<div style='font-size:0.7rem; color:#64748b; margin-top:2px;'>{r['desc']}</div>" if r.get('desc') else ""
+            t_rows += f"""
+            <tr>
+                <td style="width:28%;">
+                    <div style="font-weight:700; color:{tag_color}; font-size:0.86rem;">{r['label']}</div>
+                    {desc_html}
+                </td>
+                <td style="width:34%; font-size:0.85rem;">{r['val_html']}</td>
+                <td style="width:23%; font-size:0.78rem; color:#94a3b8; font-family:'JetBrains Mono', monospace;">{r['file_html']}</td>
+                <td style="width:15%; text-align:center;">{r['badge']}</td>
+            </tr>
+            """
+
         card_html += f"""
-        <table class="matrix-table">
-            <thead><tr><th>Dokumen Sumber</th><th>Nilai Tertera</th><th>Berkas Fisik</th></tr></thead>
+        <table class="matrix-table" style="margin:0.5rem 0 0 0;">
+            <thead>
+                <tr>
+                    <th style="width:28%;">Dokumen Persyaratan</th>
+                    <th style="width:34%;">Nilai Tertera</th>
+                    <th style="width:23%;">Berkas Fisik Sumber</th>
+                    <th style="width:15%; text-align:center;">Status</th>
+                </tr>
+            </thead>
             <tbody>{t_rows}</tbody>
         </table>
         """
     else:
-        card_html += """
-        <div style="font-size:0.82rem; color:#64748b; font-style:italic; padding:0.4rem 0;">
-            Tidak ada data tertera pada berkas permohonan.
-        </div>
-        """
+        # Standard 3-column table when expected_docs is not specified
+        if clean_sources:
+            t_rows = ""
+            for s in clean_sources:
+                page_info = f" (Hal. {s['page']})" if s.get('page') not in (None, "-", "") else ""
+                t_rows += f"<tr><td style='font-weight:700; color:{tag_color}; width:35%;'>{s['display_name']}</td><td style='font-weight:600; width:35%;'>{s['value']}</td><td style='color:#64748b; width:30%;'>{s['document_name']}{page_info}</td></tr>"
+            
+            card_html += f"""
+            <table class="matrix-table">
+                <thead><tr><th>Dokumen Sumber</th><th>Nilai Tertera</th><th>Berkas Fisik</th></tr></thead>
+                <tbody>{t_rows}</tbody>
+            </table>
+            """
+        else:
+            card_html += """
+            <div style="font-size:0.82rem; color:#64748b; font-style:italic; padding:0.4rem 0;">
+                Tidak ada data tertera pada berkas permohonan.
+            </div>
+            """
+
     card_html += "</div>"
     render_html(card_html)
 
+
 def _render_sip_consolidated_card(idx, v_field, l_field, docs_map):
-    """Renders a single consolidated card for doctor's SIP credentials (validity & practice location) to prevent duplicate 1-row cards."""
+    """Renders a single consolidated card for doctor's SIP credentials (validity & practice location).
+    Guarantees every required parameter is presented with extracted values or explicit missing notice.
+    """
     v_sources = v_field.get("sources", []) if v_field else []
     l_sources = l_field.get("sources", []) if l_field else []
-    if not v_sources and not l_sources:
-        return
+    has_sip_files = bool(docs_map.get("sip"))
 
-    v_val = v_sources[0].get("value", "—") if v_sources else "—"
-    v_doc = v_sources[0].get("file_name") or v_sources[0].get("document_name") or "Surat Izin Praktik (SIP)"
-    v_page = v_sources[0].get("page")
-    v_p_str = f" (Hal. {v_page})" if v_page not in (None, "-", "") else ""
+    # 1. Parameter Masa Berlaku Izin
+    if v_sources:
+        v_raw = v_sources[0].get("value", "—")
+        v_doc = v_sources[0].get("file_name") or v_sources[0].get("document_name") or (docs_map.get("sip", ["SIP.pdf"])[0])
+        v_p = v_sources[0].get("page")
+        v_p_str = f" (Hal. {v_p})" if v_p not in (None, "-", "") else ""
+        v_doc_str = f"{v_doc}{v_p_str}"
+        v_st = _clean_status_str(v_field.get("status", "SESUAI") if v_field else "SESUAI")
+        if v_st == "TIDAK SESUAI":
+            v_val_html = f"<strong style='color:#f87171;'>{v_raw}</strong><div style='font-size:0.72rem; color:#fca5a5; margin-top:2px;'>Masa berlaku telah berakhir (kedaluwarsa)</div>"
+            v_badge = '<span class="pill pill-fail">✗ Tidak Sesuai</span>'
+        elif v_st in {"PERLU REVIEW", "WARNING"}:
+            v_val_html = f"<strong style='color:#fbbf24;'>{v_raw}</strong><div style='font-size:0.72rem; color:#fde68a; margin-top:2px;'>Perlu konfirmasi masa berlaku</div>"
+            v_badge = '<span class="pill pill-review">⚠ Perlu Review</span>'
+        else:
+            v_val_html = f"<strong style='color:#34d399;'>{v_raw}</strong> <span style='font-size:0.75rem; color:#6ee7b7;'>(Aktif)</span>"
+            v_badge = '<span class="pill pill-match">✓ Sesuai</span>'
+    else:
+        if has_sip_files:
+            v_val_html = "<span style='color:#fde68a; font-style:italic;'>— (SIP terunggah, namun belum cocok dengan personel)</span>"
+            v_doc_str = ", ".join(docs_map.get("sip", []))
+            v_badge = '<span class="pill pill-review">⚠ Perlu Review</span>'
+            v_st = "PERLU REVIEW"
+        else:
+            v_val_html = "<span style='color:#64748b; font-style:italic;'>— (Berkas SIP belum diunggah · Wajib Regulasi)</span>"
+            v_doc_str = "—"
+            v_badge = '<span class="pill pill-missing">○ Belum Diunggah</span>'
+            v_st = "TIDAK SESUAI"
 
-    l_val = l_sources[0].get("value", "—") if l_sources else "—"
-    l_doc = l_sources[0].get("file_name") or l_sources[0].get("document_name") or "Surat Izin Praktik (SIP)"
-    l_page = l_sources[0].get("page")
-    l_p_str = f" (Hal. {l_page})" if l_page not in (None, "-", "") else ""
+    # 2. Parameter Tempat Praktik
+    if l_sources:
+        l_raw = l_sources[0].get("value", "—")
+        l_doc = l_sources[0].get("file_name") or l_sources[0].get("document_name") or (docs_map.get("sip", ["SIP.pdf"])[0])
+        l_p = l_sources[0].get("page")
+        l_p_str = f" (Hal. {l_p})" if l_p not in (None, "-", "") else ""
+        l_doc_str = f"{l_doc}{l_p_str}"
+        l_st = _clean_status_str(l_field.get("status", "SESUAI") if l_field else "SESUAI")
+        if l_st == "TIDAK SESUAI":
+            l_val_html = f"<strong style='color:#f87171;'>{l_raw}</strong><div style='font-size:0.72rem; color:#fca5a5; margin-top:2px;'>Fasilitas praktik berbeda dengan pemohon</div>"
+            l_badge = '<span class="pill pill-fail">✗ Tidak Sesuai</span>'
+        elif l_st in {"PERLU REVIEW", "WARNING"}:
+            l_val_html = f"<strong style='color:#fbbf24;'>{l_raw}</strong><div style='font-size:0.72rem; color:#fde68a; margin-top:2px;'>Variasi redaksional nama fasilitas</div>"
+            l_badge = '<span class="pill pill-review">⚠ Perlu Review</span>'
+        else:
+            l_val_html = f"<strong style='color:#f8fafc;'>{l_raw}</strong>"
+            l_badge = '<span class="pill pill-match">✓ Sesuai</span>'
+    else:
+        if has_sip_files:
+            l_val_html = "<span style='color:#fde68a; font-style:italic;'>— (Tempat praktik belum terverifikasi)</span>"
+            l_doc_str = ", ".join(docs_map.get("sip", []))
+            l_badge = '<span class="pill pill-review">⚠ Perlu Review</span>'
+            l_st = "PERLU REVIEW"
+        else:
+            l_val_html = "<span style='color:#64748b; font-style:italic;'>— (Berkas SIP belum diunggah · Wajib Regulasi)</span>"
+            l_doc_str = "—"
+            l_badge = '<span class="pill pill-missing">○ Belum Diunggah</span>'
+            l_st = "TIDAK SESUAI"
 
-    v_status = _clean_status_str(v_field.get("status", "SESUAI")) if v_field else "SESUAI"
-    l_status = _clean_status_str(l_field.get("status", "SESUAI")) if l_field else "SESUAI"
-
-    overall_status = "SESUAI"
-    if "TIDAK SESUAI" in (v_status, l_status):
+    # Overall Badge
+    if not has_sip_files:
         overall_status = "TIDAK SESUAI"
-    elif "PERLU REVIEW" in (v_status, l_status) or "WARNING" in (v_status, l_status):
+    elif "TIDAK SESUAI" in (v_st, l_st):
+        overall_status = "TIDAK SESUAI"
+    elif "PERLU REVIEW" in (v_st, l_st) or "WARNING" in (v_st, l_st):
         overall_status = "PERLU REVIEW"
+    else:
+        overall_status = "SESUAI"
 
     badge_html = _render_pill(overall_status)
 
@@ -687,38 +1492,53 @@ def _render_sip_consolidated_card(idx, v_field, l_field, docs_map):
         notes.append(v_field["reason"])
     if l_field and l_field.get("reason"):
         notes.append(l_field["reason"])
+    if not has_sip_files:
+        notes.append("Surat Izin Praktik (SIP) wajib diunggah untuk legalitas praktik fasilitas.")
+    elif not v_sources and not l_sources:
+        notes.append("Berkas SIP diunggah namun nama/kredensial belum cocok dengan data permohonan personel.")
+
     note_html = ""
     if notes:
-        note_html = f"<div style='font-size:0.82rem; color:#94a3b8; margin-bottom:0.8rem;'>{' · '.join(notes)}</div>"
+        color_note = "#fca5a5" if overall_status == "TIDAK SESUAI" else ("#fde68a" if overall_status in {"PERLU REVIEW", "WARNING"} else "#94a3b8")
+        note_html = f"<div style='font-size:0.82rem; color:{color_note}; margin-bottom:0.8rem;'>{' · '.join(notes)}</div>"
 
     card_html = f"""
     <div style="background:#0f172a; border:1px solid var(--border-subtle); border-radius:12px; padding:1.2rem; margin-bottom:1.2rem;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.8rem;">
             <div>
                 <span style="font-size:0.75rem; text-transform:uppercase; color:#38bdf8; font-weight:700;">Kredensial Izin Personel #{idx}</span>
-                <h4 style="margin:0.2rem 0 0 0; font-size:1.1rem; font-weight:800;">Surat Izin Praktik (SIP)</h4>
+                <h4 style="margin:0.2rem 0 0 0; font-size:1.1rem; font-weight:800; color:#f8fafc;">Surat Izin Praktik (SIP)</h4>
             </div>
             <div>{badge_html}</div>
         </div>
         {note_html}
-        <table class="matrix-table">
+        <table class="matrix-table" style="margin:0.5rem 0 0 0;">
             <thead>
                 <tr>
-                    <th style="width:25%;">Parameter SIP</th>
-                    <th style="width:45%;">Nilai Tertera</th>
-                    <th style="width:30%;">Berkas Sumber</th>
+                    <th style="width:28%;">Parameter SIP</th>
+                    <th style="width:34%;">Nilai Tertera</th>
+                    <th style="width:23%;">Berkas Fisik Sumber</th>
+                    <th style="width:15%; text-align:center;">Status</th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
-                    <td style="font-weight:700; color:#38bdf8;">Masa Berlaku Izin</td>
-                    <td style="font-weight:600;"><strong style="color:#34d399;">{v_val}</strong> <span style="font-size:0.75rem; color:#64748b;">(Aktif)</span></td>
-                    <td style="color:#64748b;">{v_doc}{v_p_str}</td>
+                    <td style="width:28%;">
+                        <div style="font-weight:700; color:#38bdf8; font-size:0.86rem;">Masa Berlaku Izin</div>
+                        <div style="font-size:0.7rem; color:#64748b; margin-top:2px;">Batas Akhir Legalitas Praktik</div>
+                    </td>
+                    <td style="width:34%; font-size:0.85rem;">{v_val_html}</td>
+                    <td style="width:23%; font-size:0.78rem; color:#94a3b8; font-family:'JetBrains Mono', monospace;">{v_doc_str}</td>
+                    <td style="width:15%; text-align:center;">{v_badge}</td>
                 </tr>
                 <tr>
-                    <td style="font-weight:700; color:#38bdf8;">Tempat Praktik</td>
-                    <td style="font-weight:600;">{l_val}</td>
-                    <td style="color:#64748b;">{l_doc}{l_p_str}</td>
+                    <td style="width:28%;">
+                        <div style="font-weight:700; color:#38bdf8; font-size:0.86rem;">Tempat Praktik</div>
+                        <div style="font-size:0.7rem; color:#64748b; margin-top:2px;">Kesesuaian Faskes Pemohon</div>
+                    </td>
+                    <td style="width:34%; font-size:0.85rem;">{l_val_html}</td>
+                    <td style="width:23%; font-size:0.78rem; color:#94a3b8; font-family:'JetBrains Mono', monospace;">{l_doc_str}</td>
+                    <td style="width:15%; text-align:center;">{l_badge}</td>
                 </tr>
             </tbody>
         </table>
@@ -728,8 +1548,139 @@ def _render_sip_consolidated_card(idx, v_field, l_field, docs_map):
 
 
 
+def split_project_address(raw_alamat_proyek: str):
+    """Splits raw Alamat Proyek from BAPETEN Formulir Permohonan into (nama_instansi, alamat_instansi)."""
+    if not raw_alamat_proyek:
+        return "", ""
+    text = re.sub(r"\s+", " ", str(raw_alamat_proyek or "")).strip(" :;-\t")
+    if not text:
+        return "", ""
+    street_indicators = r"^(?:Jl\.?|Jalan|Dusun|Desa|Komplek|Kav\.?|Gedung|Blok|RT\b|RW\b|No\.)\b"
+    if "," in text:
+        parts = text.split(",", 1)
+        cand_name = parts[0].strip()
+        cand_addr = parts[1].strip()
+        if cand_name and not re.match(street_indicators, cand_name, re.IGNORECASE):
+            return cand_name, cand_addr
+        return "", text
+    m = re.search(
+        r"^(.*?)\s+(?=(?:Jl\.?|Jalan|Dusun|Desa|Komplek|Kav\.?|Gedung|Blok|RT\s*\d|RW\s*\d)\b)(.+)$",
+        text,
+        re.IGNORECASE,
+    )
+    if m:
+        cand_name = m.group(1).strip().rstrip(",")
+        cand_addr = m.group(2).strip()
+        if cand_name and not re.match(street_indicators, cand_name, re.IGNORECASE):
+            return cand_name, cand_addr
+    return "", text
+
+
+# Safely ensure persistent Streamlit runtime reloads form_parser if cached without split_project_address
+try:
+    import sys, importlib
+    if "src.extraction.form_parser" in sys.modules:
+        importlib.reload(sys.modules["src.extraction.form_parser"])
+except Exception:
+    pass
+
+
+def _sanitize_run_facility_identity(run_obj):
+    """Guarantees that formulir facility name and address are correctly derived
+    from Alamat Proyek prefix and suffix, including historical runs saved in DB."""
+    if not run_obj or not isinstance(run_obj, dict):
+        return run_obj
+
+    form_docs = run_obj.get("extractions", {}).get("formulir", [])
+    split_hname = ""
+    split_haddr = ""
+    for doc in form_docs:
+        f = doc.get("fields", {})
+        hdr = f.get("header", {})
+        p_addr = (
+            hdr.get("project_address", {}).get("value")
+            if isinstance(hdr.get("project_address"), dict)
+            else (hdr.get("Alamat Proyek") or hdr.get("project_address"))
+        )
+        if not p_addr:
+            p_addr = f.get("hospital_address", {}).get("value")
+        if p_addr:
+            s_name, s_addr = split_project_address(p_addr)
+            if s_name:
+                split_hname = s_name
+                f["hospital_name"] = {
+                    "value": s_name,
+                    "page": f.get("hospital_name", {}).get("page", 1),
+                    "method": "project_address_prefix",
+                    "confidence": 1.0,
+                }
+            if s_addr:
+                split_haddr = s_addr
+                f["hospital_address"] = {
+                    "value": s_addr,
+                    "page": f.get("hospital_address", {}).get("page", 1),
+                    "method": "project_address_suffix",
+                    "confidence": 1.0,
+                }
+
+    fac_obj = run_obj.get("cross_check_report", {}).get("facility", {})
+    fac_fields = fac_obj.get("fields", {})
+
+    if split_hname:
+        for s in fac_fields.get("project_name", {}).get("sources", []):
+            if s.get("document_type") == "formulir":
+                s["value"] = split_hname
+    if split_haddr:
+        for s in fac_fields.get("project_address", {}).get("sources", []):
+            if s.get("document_type") == "formulir":
+                s["value"] = split_haddr
+
+    # Re-evaluate project_name and project_address cross-check evaluations
+    try:
+        from src.matching.cross_check_engine import evaluate_field_sources, SourceEvidence
+        for fkey, mode, flabel in [
+            ("project_name", "facility_name", "Nama instansi"),
+            ("project_address", "fuzzy_address", "Alamat instansi"),
+        ]:
+            f_data = fac_fields.get(fkey)
+            if f_data and "sources" in f_data:
+                ev_list = [
+                    SourceEvidence(
+                        document_type=s.get("document_type", ""),
+                        document_name=s.get("document_name", ""),
+                        value=s.get("value", ""),
+                        page=_safe_page_int(s.get("page")),
+                    )
+                    for s in f_data.get("sources", [])
+                    if s.get("value") and s.get("value") not in ("—", "-")
+                ]
+                if len(ev_list) > 1:
+                    eval_res = evaluate_field_sources(fkey, flabel, ev_list, mode=mode)
+                    f_data["status"] = eval_res.status.value
+                    f_data["score"] = eval_res.score
+                    f_data["reason"] = eval_res.reason
+                    f_data["discrepancies"] = eval_res.discrepancies
+
+        statuses = [
+            _clean_status_str(f_data.get("status", ""))
+            for f_data in fac_fields.values()
+            if isinstance(f_data, dict)
+        ]
+        if any("TIDAK SESUAI" in s for s in statuses):
+            fac_obj["status"] = "TIDAK SESUAI"
+        elif any("PERLU REVIEW" in s or "WARNING" in s for s in statuses):
+            fac_obj["status"] = "PERLU REVIEW"
+        else:
+            fac_obj["status"] = "SESUAI"
+    except Exception:
+        pass
+
+    return run_obj
+
+
 def _extract_applicant_details(res):
     """Extracts institutional profile from result object for presentation."""
+    res = _sanitize_run_facility_identity(res)
     details = {
         "hospital_name": "Tidak Terdeteksi",
         "hospital_address": "Tidak Terdeteksi",
@@ -875,14 +1826,16 @@ run_labels = {r_id: _get_run_summary_label(r_id) for r_id in run_options}
 
 if past_runs and "latest_result" not in st.session_state:
     try:
-        st.session_state["latest_result"] = db.get_run(past_runs[0][0])
+        st.session_state["latest_result"] = _sanitize_run_facility_identity(db.get_run(past_runs[0][0]))
     except Exception:
         pass
 
 
-@st.cache_data(show_spinner=False)
 def _cached_classify_document(filename, file_size, head_bytes, file_bytes):
-    return classify_document(filename, file_bytes)
+    import importlib
+    import src.extraction.classifier as cls_mod
+    importlib.reload(cls_mod)
+    return cls_mod.classify_document(filename, file_bytes)
 
 
 def save_uploaded(uploaded_file, directory, doc_type, index):
@@ -924,7 +1877,7 @@ with st.sidebar:
         if curr_id != selected_run_id:
             loaded_run = db.get_run(selected_run_id)
             if loaded_run:
-                st.session_state["latest_result"] = loaded_run
+                st.session_state["latest_result"] = _sanitize_run_facility_identity(loaded_run)
                 st.rerun()
 
         render_html("<hr style='margin:10px 0; border-color:rgba(255,255,255,0.08);'>")
@@ -957,7 +1910,7 @@ with st.sidebar:
                         options=doc_keys,
                         default=[detected_type] if detected_type in doc_keys else [],
                         format_func=lambda k: doc_names[k],
-                        key=f"sb_up_{idx}_{file.name}",
+                        key=f"sb_up_{idx}_{file.name}_{detected_type}",
                         label_visibility="collapsed",
                     )
                 for ct in chosen:
@@ -1006,9 +1959,18 @@ if process_btn:
 
             with status_box:
                 st.write("Menjalankan OCR cerdas, ekstraksi entitas, dan validasi silang...")
+                import sys, importlib
+                for mod_name in list(sys.modules.keys()):
+                    if mod_name.startswith("src.") or mod_name == "src":
+                        try:
+                            importlib.reload(sys.modules[mod_name])
+                        except Exception:
+                            pass
+                from src.pipeline import execute_run
                 result_obj = execute_run(inputs, on_progress=on_prog)
                 status_box.update(label="✅ Verifikasi Selesai!", state="complete", expanded=False)
 
+            result_obj = _sanitize_run_facility_identity(result_obj)
             result_obj["file_display"] = file_display
             db.save_run_generic(result_obj)
             st.session_state["latest_result"] = result_obj
@@ -1020,7 +1982,7 @@ if process_btn:
 # ═══════════════════════════════════════════════════════════════════
 # MAIN CONTENT AREA
 # ═══════════════════════════════════════════════════════════════════
-active_run = st.session_state.get("latest_result")
+active_run = _sanitize_run_facility_identity(st.session_state.get("latest_result"))
 
 if active_run:
     app_details = _extract_applicant_details(active_run)
@@ -1194,24 +2156,75 @@ if active_run:
     # ─────────────────────────────────────────────────────────────
     with tab_instansi:
         render_html("""
-        <div style="margin-bottom:1rem;">
-            <h3 style="margin:0; font-size:1.15rem; font-weight:800;">🏢 Verifikasi Identitas Fasilitas & Instansi</h3>
-            <p style="margin:0.2rem 0 0 0; font-size:0.82rem; color:#94a3b8;">
-                Perbandingan konsistensi nama dan alamat rumah sakit / instansi pemohon di seluruh dokumen yang diunggah.
+        <div style="margin-bottom:1.5rem;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:0.75rem; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; color:#38bdf8;">
+                    Identitas Subjek Hukum
+                </span>
+            </div>
+            <h3 style="margin:0.2rem 0 0 0; font-size:1.35rem; font-weight:800; color:#38bdf8;">
+                🏢 Verifikasi Identitas Fasilitas & Instansi Pemohon
+            </h3>
+            <p style="margin:0.25rem 0 0 0; font-size:0.84rem; color:#94a3b8;">
+                Verifikasi konsistensi nama dan alamat rumah sakit / fasilitas pemohon di seluruh berkas permohonan izin pemanfaatan radiasi sesuai regulasi BAPETEN.
             </p>
         </div>
         """)
 
-        fac_rep = active_run.get("cross_check_report", {}).get("facility", {}).get("fields", {})
-        docs_map = active_run.get("documents", {})
-        
-        # 1. Nama Instansi
-        pname_field = fac_rep.get("project_name", {})
-        _render_parameter_card("Field Identitas", "Nama Rumah Sakit / Instansi Pemohon", pname_field, docs_map)
+        fac_obj = active_run.get("cross_check_report", {}).get("facility", {})
+        fac_rep = fac_obj.get("fields", {})
 
-        # 2. Alamat Instansi
-        paddr_field = fac_rep.get("project_address", {})
-        _render_parameter_card("Field Identitas", "Alamat Rumah Sakit / Lokasi Fasilitas", paddr_field, docs_map)
+        # Determine overall facility status directly from parameter fields
+        pname_st = _clean_status_str(fac_rep.get("project_name", {}).get("status", "SESUAI"))
+        paddr_st = _clean_status_str(fac_rep.get("project_address", {}).get("status", "SESUAI"))
+        if "TIDAK SESUAI" in (pname_st, paddr_st):
+            fac_status = "TIDAK SESUAI"
+        elif "PERLU REVIEW" in (pname_st, paddr_st) or "WARNING" in (pname_st, paddr_st):
+            fac_status = "PERLU REVIEW"
+        else:
+            fac_status = "SESUAI"
+        docs_map = active_run.get("documents", {})
+
+        # Header Banner Instansi
+        render_html(f"""
+        <div style="display:flex; justify-content:space-between; align-items:center; background:#111c35; border:1px solid rgba(56, 189, 248, 0.22); border-radius:12px; padding:0.9rem 1.4rem; margin:0 0 1.5rem 0;">
+            <div>
+                <span style="font-size:0.72rem; text-transform:uppercase; color:#38bdf8; font-weight:700;">
+                    Profil Pemohon & Objek Izin
+                </span>
+                <div style="font-size:1.2rem; font-weight:800; color:#f8fafc; margin-top:2px;">
+                    🏥 {app_details['hospital_name']}
+                </div>
+            </div>
+            <div>{_render_pill(fac_status)}</div>
+        </div>
+        """)
+
+        # 1. Parameter Nama Rumah Sakit / Instansi Pemohon
+        pname_field = fac_rep.get("project_name", {"sources": []})
+        if isinstance(pname_field, dict) and "field_key" not in pname_field:
+            pname_field = dict(pname_field)
+            pname_field["field_key"] = "project_name"
+        _render_parameter_card(
+            "Parameter Identitas Pemohon",
+            "Nama Rumah Sakit / Instansi Pemohon",
+            pname_field,
+            docs_map,
+            expected_docs=FACILITY_NAME_EXPECTED_DOCS,
+        )
+
+        # 2. Parameter Alamat Rumah Sakit / Lokasi Fasilitas
+        paddr_field = fac_rep.get("project_address", {"sources": []})
+        if isinstance(paddr_field, dict) and "field_key" not in paddr_field:
+            paddr_field = dict(paddr_field)
+            paddr_field["field_key"] = "project_address"
+        _render_parameter_card(
+            "Parameter Lokasi Fasilitas",
+            "Alamat Rumah Sakit / Lokasi Fasilitas",
+            paddr_field,
+            docs_map,
+            expected_docs=FACILITY_ADDRESS_EXPECTED_DOCS,
+        )
 
     # ─────────────────────────────────────────────────────────────
     # TAB 3: PPR & PERSONEL
@@ -1241,19 +2254,22 @@ if active_run:
         # Filter PPR agar TIDAK duplikat masuk ke daftar 'Data Petugas Lainnya'
         def _is_ppr_person(p):
             pf = p.get("fields", {})
-            for s in pf.get("profession", {}).get("sources", []):
-                val = str(s.get("value") or "").lower()
-                if "ppr" in val or "proteksi" in val:
-                    return True
-            p_clean = ""
-            for s in pf.get("person_name", {}).get("sources", []):
-                if s.get("value"):
-                    p_clean = str(s.get("value")).strip()
-                    break
-            if not p_clean:
-                p_clean = p.get("entity_label", "")
-            if ppr_display_name and p_clean and fuzz.ratio(p_clean.lower(), ppr_display_name.lower()) >= 80:
+            prof_sources = pf.get("profession", {}).get("sources", [])
+            roles = [str(s.get("value") or "").strip().lower() for s in prof_sources if s.get("value")]
+            # If the entry explicitly specifies a PPR role, it belongs to Section 2 (PPR)
+            if any("ppr" in r or "proteksi" in r for r in roles):
                 return True
+            # Only if the entry has NO profession specified at all, check if name matches PPR
+            if not roles:
+                p_clean = ""
+                for s in pf.get("person_name", {}).get("sources", []):
+                    if s.get("value"):
+                        p_clean = str(s.get("value")).strip()
+                        break
+                if not p_clean:
+                    p_clean = p.get("entity_label", "")
+                if ppr_display_name and p_clean and fuzz.ratio(p_clean.lower(), ppr_display_name.lower()) >= 80:
+                    return True
             return False
 
         other_personnel = [p for p in personnel_list if not _is_ppr_person(p)]
@@ -1312,42 +2328,27 @@ if active_run:
                 """)
 
                 # 1. Parameter Nama Personel (clean title without duplicate name suffix)
-                if "person_name" in pf:
-                    _render_parameter_card(
-                        f"Field Identitas Personel #{idx}",
-                        "Nama Personel",
-                        pf["person_name"],
-                        docs_map,
-                    )
+                name_f = pf.get("person_name") or {"sources": []}
+                _render_parameter_card(
+                    f"Field Identitas Personel #{idx}",
+                    "Nama Personel",
+                    name_f,
+                    docs_map,
+                    expected_docs=PERSONNEL_NAME_EXPECTED_DOCS,
+                )
 
                 # 2. Parameter Profesi / Kualifikasi (clean title without duplicate name suffix)
-                if "profession" in pf and pf["profession"].get("sources"):
-                    _render_parameter_card(
-                        f"Kualifikasi Personel #{idx}",
-                        "Kualifikasi / Profesi",
-                        pf["profession"],
-                        docs_map,
-                    )
+                prof_f = pf.get("profession") or {"sources": []}
+                _render_parameter_card(
+                    f"Kualifikasi Personel #{idx}",
+                    "Kualifikasi / Profesi",
+                    prof_f,
+                    docs_map,
+                    expected_docs=PERSONNEL_PROFESSION_EXPECTED_DOCS,
+                )
 
                 # 3. Parameter SIP: gabungkan Masa Berlaku dan Tempat Praktik dalam 1 kartu terpadu agar tidak terlihat duplikat
-                has_v = "valid_until" in pf and bool(pf["valid_until"].get("sources"))
-                has_l = "practice_location" in pf and bool(pf["practice_location"].get("sources"))
-                if has_v and has_l:
-                    _render_sip_consolidated_card(idx, pf.get("valid_until"), pf.get("practice_location"), docs_map)
-                elif has_v:
-                    _render_parameter_card(
-                        f"Kredensial Izin Personel #{idx}",
-                        "Masa Berlaku Izin Praktik (SIP)",
-                        pf["valid_until"],
-                        docs_map,
-                    )
-                elif has_l:
-                    _render_parameter_card(
-                        f"Kredensial Lokasi Personel #{idx}",
-                        "Kesesuaian Tempat Praktik (SIP)",
-                        pf["practice_location"],
-                        docs_map,
-                    )
+                _render_sip_consolidated_card(idx, pf.get("valid_until"), pf.get("practice_location"), docs_map)
         else:
             st.info("Tidak ada daftar petugas lainnya yang terdaftar.")
 
@@ -1429,30 +2430,54 @@ if active_run:
         if ppr_rep_list:
             for ppr_item in ppr_rep_list:
                 ppr_f = ppr_item.get("fields", {})
-                if "ppr_name" in ppr_f and ppr_f["ppr_name"].get("sources"):
-                    _render_parameter_card(
-                        "Field Identitas PPR",
-                        "Nama Petugas Proteksi Radiasi (PPR)",
-                        ppr_f["ppr_name"],
-                        docs_map,
-                    )
-                if "valid_until" in ppr_f and ppr_f["valid_until"].get("sources"):
-                    _render_parameter_card(
-                        "Kredensial SIB",
-                        "Masa Berlaku Surat Izin Bekerja (SIB)",
-                        ppr_f["valid_until"],
-                        docs_map,
-                    )
+                name_f = ppr_f.get("ppr_name") or {"sources": []}
+                _render_parameter_card(
+                    "Field Identitas PPR",
+                    "Nama Petugas Proteksi Radiasi (PPR)",
+                    name_f,
+                    docs_map,
+                    expected_docs=PPR_NAME_EXPECTED_DOCS,
+                )
+                valid_f = ppr_f.get("valid_until") or {"sources": []}
+                _render_parameter_card(
+                    "Kredensial SIB",
+                    "Masa Berlaku Surat Izin Bekerja (SIB)",
+                    valid_f,
+                    docs_map,
+                    expected_docs=PPR_SIB_EXPECTED_DOCS,
+                )
+        else:
+            _render_parameter_card(
+                "Field Identitas PPR",
+                "Nama Petugas Proteksi Radiasi (PPR)",
+                {"sources": []},
+                docs_map,
+                expected_docs=PPR_NAME_EXPECTED_DOCS,
+            )
+            _render_parameter_card(
+                "Kredensial SIB",
+                "Masa Berlaku Surat Izin Bekerja (SIB)",
+                {"sources": []},
+                docs_map,
+                expected_docs=PPR_SIB_EXPECTED_DOCS,
+            )
 
     # ─────────────────────────────────────────────────────────────
     # TAB 4: PESAWAT SINAR-X
     # ─────────────────────────────────────────────────────────────
     with tab_pesawat:
         render_html("""
-        <div style="margin-bottom:1rem;">
-            <h3 style="margin:0; font-size:1.15rem; font-weight:800;">⚡ Spesifikasi Pesawat & Tabung Sinar-X</h3>
-            <p style="margin:0.2rem 0 0 0; font-size:0.82rem; color:#94a3b8;">
-                Verifikasi silang nomor seri, merk, dan model pesawat serta tabung sinar-X antar izin impor, formulir, dan uji fungsi.
+        <div style="margin-bottom:1.5rem;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:0.75rem; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; color:#38bdf8;">
+                    Spesifikasi Peralatan Radiasi
+                </span>
+            </div>
+            <h3 style="margin:0.2rem 0 0 0; font-size:1.35rem; font-weight:800; color:#38bdf8;">
+                ⚡ Verifikasi Spesifikasi Pesawat & Tabung Sinar-X
+            </h3>
+            <p style="margin:0.25rem 0 0 0; font-size:0.84rem; color:#94a3b8;">
+                Verifikasi silang konsistensi nomor seri, merk, dan model pesawat serta tabung sinar-X antar formulir permohonan, foto plat identitas fisik, izin impor BAPETEN, dan laporan uji kesesuaian.
             </p>
         </div>
         """)
@@ -1461,64 +2486,205 @@ if active_run:
         x_tb_list = active_run.get("cross_check_report", {}).get("xray_tubes", [])
         docs_map = active_run.get("documents", {})
 
-        if not x_eq_list and not x_tb_list:
-            st.info("Data peralatan sinar-X tidak ditemukan pada hasil ekstraksi.")
-        else:
-            # ── A. Pesawat Sinar-X Units ──
+        # ─────────────────────────────────────────────────────────────
+        # 1. DATA UNIT PESAWAT SINAR-X (X-RAY EQUIPMENT)
+        # ─────────────────────────────────────────────────────────────
+        render_html("""
+        <div style="margin-bottom:1.2rem;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:0.75rem; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; color:#38bdf8;">
+                    Bagian 1
+                </span>
+            </div>
+            <h3 style="margin:0.2rem 0 0 0; font-size:1.25rem; font-weight:800; color:#38bdf8;">
+                1. Data Unit Pesawat Sinar-X
+            </h3>
+            <p style="margin:0.25rem 0 0 0; font-size:0.83rem; color:#94a3b8;">
+                Verifikasi konsistensi merk, tipe/model, dan nomor seri generator / unit kontrol terhadap formulir permohonan, foto label unit fisik, dan laporan uji kesesuaian.
+            </p>
+        </div>
+        """)
+
+        unit_expected_map = {
+            "unit_brand": XRAY_UNIT_BRAND_EXPECTED_DOCS,
+            "unit_type": XRAY_UNIT_TYPE_EXPECTED_DOCS,
+            "unit_serial_number": XRAY_UNIT_SERIAL_EXPECTED_DOCS,
+        }
+        unit_param_titles = {
+            "unit_brand": "Merk Pesawat Sinar-X (Brand)",
+            "unit_type": "Tipe / Model Pesawat Sinar-X (Model / Type)",
+            "unit_serial_number": "Nomor Seri Pesawat Sinar-X (Serial Number)",
+        }
+
+        if x_eq_list:
             for idx, eq in enumerate(x_eq_list, start=1):
                 eq_label = eq.get("entity_label") or f"Pesawat Sinar-X Unit #{idx}"
                 eq_status = _clean_status_str(eq.get("status") or "SESUAI")
                 eq_fields = eq.get("fields", {})
 
+                # Entity Header Banner (Cyan Theme)
                 render_html(f"""
-                <div style="display:flex; justify-content:space-between; align-items:center; background:#131d31; border:1px solid rgba(56, 189, 248, 0.25); border-radius:12px; padding:0.9rem 1.4rem; margin:1.2rem 0 1rem 0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; background:#111c35; border:1px solid rgba(56, 189, 248, 0.22); border-radius:12px; padding:0.9rem 1.4rem; margin:1.6rem 0 1rem 0;">
                     <div>
-                        <span style="font-size:0.72rem; text-transform:uppercase; color:#38bdf8; font-weight:700;">Pesawat Sinar-X</span>
-                        <div style="font-size:1.15rem; font-weight:800; color:#f8fafc;">⚡ {eq_label}</div>
+                        <span style="font-size:0.72rem; text-transform:uppercase; color:#38bdf8; font-weight:700;">
+                            Pesawat Sinar-X · Unit #{idx}
+                        </span>
+                        <div style="font-size:1.15rem; font-weight:800; color:#f8fafc; margin-top:2px;">
+                            ⚡ {eq_label}
+                        </div>
                     </div>
                     <div>{_render_pill(eq_status)}</div>
                 </div>
                 """)
 
-                param_titles = {
-                    "unit_brand": "Merk Pesawat Sinar-X (Brand)",
-                    "unit_type": "Tipe / Model Pesawat Sinar-X (Type)",
-                    "unit_serial_number": "Nomor Seri Pesawat Sinar-X (Serial Number)",
-                }
-                order = ["unit_brand", "unit_type", "unit_serial_number"] + [k for k in eq_fields if k not in ["unit_brand", "unit_type", "unit_serial_number"]]
-                for fk in order:
-                    if fk in eq_fields:
-                        fv = eq_fields[fk]
-                        ftitle = param_titles.get(fk, fv.get("field_label") or fk.replace("_", " ").title())
-                        _render_parameter_card("Parameter Pesawat Sinar-X", ftitle, fv, docs_map)
+                # Render the 3 standard regulatory parameters (always guaranteed to be shown)
+                for fk in ["unit_brand", "unit_type", "unit_serial_number"]:
+                    fv = eq_fields.get(fk, {"sources": []})
+                    if isinstance(fv, dict) and "field_key" not in fv:
+                        fv = dict(fv)
+                        fv["field_key"] = fk
+                    ftitle = unit_param_titles.get(fk, fk.replace("_", " ").title())
+                    _render_parameter_card(
+                        f"Parameter Unit Pesawat #{idx}",
+                        ftitle,
+                        fv,
+                        docs_map,
+                        expected_docs=unit_expected_map.get(fk),
+                    )
 
-            # ── B. Tabung Sinar-X Tubes ──
+                # Render any additional non-standard fields if present in eq_fields
+                for fk, fv in eq_fields.items():
+                    if fk not in ["unit_brand", "unit_type", "unit_serial_number"]:
+                        ftitle = fv.get("field_label") if isinstance(fv, dict) else fk.replace("_", " ").title()
+                        _render_parameter_card(
+                            f"Parameter Unit Pesawat #{idx}",
+                            ftitle,
+                            fv,
+                            docs_map,
+                        )
+        else:
+            render_html("""
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#111c35; border:1px solid rgba(56, 189, 248, 0.22); border-radius:12px; padding:0.9rem 1.4rem; margin:1.6rem 0 1rem 0;">
+                <div>
+                    <span style="font-size:0.72rem; text-transform:uppercase; color:#38bdf8; font-weight:700;">
+                        Pesawat Sinar-X · Unit #1
+                    </span>
+                    <div style="font-size:1.15rem; font-weight:800; color:#f8fafc; margin-top:2px;">
+                        ⚡ Pesawat Sinar-X Unit #1
+                    </div>
+                </div>
+                <div><span class="pill pill-missing">○ Belum Terdaftar</span></div>
+            </div>
+            """)
+            for fk in ["unit_brand", "unit_type", "unit_serial_number"]:
+                ftitle = unit_param_titles.get(fk, fk.replace("_", " ").title())
+                _render_parameter_card(
+                    "Parameter Unit Pesawat #1",
+                    ftitle,
+                    {"sources": [], "field_key": fk},
+                    docs_map,
+                    expected_docs=unit_expected_map.get(fk),
+                )
+
+        # ─────────────────────────────────────────────────────────────
+        # 2. DATA TABUNG SINAR-X (X-RAY TUBE)
+        # ─────────────────────────────────────────────────────────────
+        render_html("""
+        <div style="margin:2.8rem 0 1.2rem 0; padding-top:1.5rem; border-top:1px solid rgba(168, 85, 247, 0.3);">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:0.75rem; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; color:#a855f7;">
+                    Bagian 2
+                </span>
+            </div>
+            <h3 style="margin:0.2rem 0 0 0; font-size:1.25rem; font-weight:800; color:#c084fc;">
+                2. Data Tabung Sinar-X (X-Ray Tube / Housing / Insert)
+            </h3>
+            <p style="margin:0.25rem 0 0 0; font-size:0.83rem; color:#94a3b8;">
+                Verifikasi konsistensi merk, tipe/model insert/housing, dan nomor seri tabung terhadap formulir permohonan, foto label plat tabung fisik, dan laporan uji kesesuaian.
+            </p>
+        </div>
+        """)
+
+        tube_expected_map = {
+            "tube_brand": XRAY_TUBE_BRAND_EXPECTED_DOCS,
+            "tube_type": XRAY_TUBE_TYPE_EXPECTED_DOCS,
+            "tube_serial_number": XRAY_TUBE_SERIAL_EXPECTED_DOCS,
+        }
+        tube_param_titles = {
+            "tube_brand": "Merk Tabung Sinar-X (Tube Brand)",
+            "tube_type": "Tipe / Model Tabung Sinar-X (Tube Model / Type)",
+            "tube_serial_number": "Nomor Seri Tabung Sinar-X (Tube Serial Number)",
+        }
+
+        if x_tb_list:
             for idx, tb in enumerate(x_tb_list, start=1):
                 tb_label = tb.get("entity_label") or f"Tabung Sinar-X #{idx}"
                 tb_status = _clean_status_str(tb.get("status") or "SESUAI")
                 tb_fields = tb.get("fields", {})
 
+                # Entity Header Banner (Purple Theme)
                 render_html(f"""
-                <div style="display:flex; justify-content:space-between; align-items:center; background:#19142b; border:1px solid rgba(168, 85, 247, 0.25); border-radius:12px; padding:0.9rem 1.4rem; margin:1.5rem 0 1rem 0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; background:#19142b; border:1px solid rgba(168, 85, 247, 0.25); border-radius:12px; padding:0.9rem 1.4rem; margin:1.6rem 0 1rem 0;">
                     <div>
-                        <span style="font-size:0.72rem; text-transform:uppercase; color:#a855f7; font-weight:700;">Tabung Sinar-X (X-Ray Tube)</span>
-                        <div style="font-size:1.15rem; font-weight:800; color:#f8fafc;">🔬 {tb_label}</div>
+                        <span style="font-size:0.72rem; text-transform:uppercase; color:#a855f7; font-weight:700;">
+                            Tabung Sinar-X · Tabung #{idx}
+                        </span>
+                        <div style="font-size:1.15rem; font-weight:800; color:#f8fafc; margin-top:2px;">
+                            🔬 {tb_label}
+                        </div>
                     </div>
                     <div>{_render_pill(tb_status)}</div>
                 </div>
                 """)
 
-                tb_param_titles = {
-                    "tube_brand": "Merk Tabung Sinar-X (Tube Brand)",
-                    "tube_type": "Tipe / Model Tabung Sinar-X (Tube Model / Type)",
-                    "tube_serial_number": "Nomor Seri Tabung Sinar-X (Tube Serial Number)",
-                }
-                order = ["tube_brand", "tube_type", "tube_serial_number"] + [k for k in tb_fields if k not in ["tube_brand", "tube_type", "tube_serial_number"]]
-                for fk in order:
-                    if fk in tb_fields:
-                        fv = tb_fields[fk]
-                        ftitle = tb_param_titles.get(fk, fv.get("field_label") or fk.replace("_", " ").title())
-                        _render_parameter_card("Parameter Tabung Sinar-X", ftitle, fv, docs_map)
+                # Render the 3 standard regulatory parameters (always guaranteed to be shown)
+                for fk in ["tube_brand", "tube_type", "tube_serial_number"]:
+                    fv = tb_fields.get(fk, {"sources": []})
+                    if isinstance(fv, dict) and "field_key" not in fv:
+                        fv = dict(fv)
+                        fv["field_key"] = fk
+                    ftitle = tube_param_titles.get(fk, fk.replace("_", " ").title())
+                    _render_parameter_card(
+                        f"Parameter Tabung Sinar-X #{idx}",
+                        ftitle,
+                        fv,
+                        docs_map,
+                        expected_docs=tube_expected_map.get(fk),
+                    )
+
+                # Render any additional non-standard fields if present in tb_fields
+                for fk, fv in tb_fields.items():
+                    if fk not in ["tube_brand", "tube_type", "tube_serial_number"]:
+                        ftitle = fv.get("field_label") if isinstance(fv, dict) else fk.replace("_", " ").title()
+                        _render_parameter_card(
+                            f"Parameter Tabung Sinar-X #{idx}",
+                            ftitle,
+                            fv,
+                            docs_map,
+                        )
+        else:
+            render_html("""
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#19142b; border:1px solid rgba(168, 85, 247, 0.25); border-radius:12px; padding:0.9rem 1.4rem; margin:1.6rem 0 1rem 0;">
+                <div>
+                    <span style="font-size:0.72rem; text-transform:uppercase; color:#a855f7; font-weight:700;">
+                        Tabung Sinar-X · Tabung #1
+                    </span>
+                    <div style="font-size:1.15rem; font-weight:800; color:#f8fafc; margin-top:2px;">
+                        🔬 Tabung Sinar-X #1
+                    </div>
+                </div>
+                <div><span class="pill pill-missing">○ Belum Terdaftar</span></div>
+            </div>
+            """)
+            for fk in ["tube_brand", "tube_type", "tube_serial_number"]:
+                ftitle = tube_param_titles.get(fk, fk.replace("_", " ").title())
+                _render_parameter_card(
+                    "Parameter Tabung Sinar-X #1",
+                    ftitle,
+                    {"sources": [], "field_key": fk},
+                    docs_map,
+                    expected_docs=tube_expected_map.get(fk),
+                )
 
     # ─────────────────────────────────────────────────────────────
     # TAB 5: KELENGKAPAN DOKUMEN (CHECKLIST)

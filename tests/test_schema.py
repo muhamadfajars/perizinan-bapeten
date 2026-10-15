@@ -1,10 +1,16 @@
 from src.schema.fields import DOCUMENT_TYPES, DOCUMENT_FIELDS, FIELD_DEFINITIONS
 
 
-def test_master_schema_has_15_document_types():
-    assert len(DOCUMENT_TYPES) == 15
+def test_master_schema_has_17_document_types():
+    assert len(DOCUMENT_TYPES) == 17
     assert set(DOCUMENT_TYPES) == set(DOCUMENT_FIELDS)
     assert "sertifikat_mutu" not in DOCUMENT_TYPES
+    assert DOCUMENT_FIELDS["laporan_dosis_awal"] == [
+        "hospital_name", "hospital_address", "usage_period", "person_name"
+    ]
+    assert DOCUMENT_FIELDS["gedung_penahan_radiasi"] == [
+        "hospital_name", "hospital_address"
+    ]
 
 
 def test_required_label_fields_are_present():

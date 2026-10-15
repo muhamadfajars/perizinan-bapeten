@@ -32,7 +32,7 @@ Sistem menggunakan kamus alias (`BRAND_ALIASES` dan `BRAND_FULL_NAMES`) untuk me
 
 ---
 
-## 📋 3. Aturan Bisnis & Logika Domain Perizinan BAPETEN
+## 📋 3. Aturan Bisnis & Logika Domain Perizinan BAPETEN (17 Berkas Aktif)
 
 ### A. Identitas Fasilitas Pemohon
 - [x] **Nama Instansi**: Menoleransi variasi singkatan (*RS*, *RSUD*, *Rumkit*, *Rumah Sakit*) dan nama yayasan/badan hukum pemohon.

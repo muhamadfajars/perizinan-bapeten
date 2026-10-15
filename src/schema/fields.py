@@ -66,6 +66,14 @@ DOCUMENT_TYPES = {
         "name": "Uji Kesesuaian",
         "kind": "pdf",
     },
+    "laporan_dosis_awal": {
+        "name": "Laporan Dosis Awal",
+        "kind": "pdf",
+    },
+    "gedung_penahan_radiasi": {
+        "name": "Rencana Teknis Fasilitas Bangunan Gedung Penahan Radiasi",
+        "kind": "pdf",
+    },
 }
 
 FIELD_DEFINITIONS = {
@@ -119,19 +127,19 @@ CROSS_CHECK_RULES = [
     {
         "rule_id": "CC-01",
         "field": "hospital_name",
-        "documents": ["formulir", "sprint", "tld", "sistem_manajemen", "program_perawatan", "ppkr", "paparan_radiasi", "uji_fungsi", "uji_kesesuaian"],
+        "documents": ["formulir", "sprint", "tld", "sistem_manajemen", "program_perawatan", "ppkr", "paparan_radiasi", "uji_fungsi", "uji_kesesuaian", "laporan_dosis_awal", "gedung_penahan_radiasi"],
         "mode": "fuzzy_name",
     },
     {
         "rule_id": "CC-02",
         "field": "hospital_address",
-        "documents": ["formulir", "sprint", "tld", "sistem_manajemen", "program_perawatan", "ppkr", "paparan_radiasi", "uji_fungsi", "uji_kesesuaian"],
+        "documents": ["formulir", "sprint", "tld", "sistem_manajemen", "program_perawatan", "ppkr", "paparan_radiasi", "uji_fungsi", "uji_kesesuaian", "laporan_dosis_awal", "gedung_penahan_radiasi"],
         "mode": "fuzzy_address",
     },
     {
         "rule_id": "CC-03",
         "field": "person_name",
-        "documents": ["formulir", "sip", "sprint", "tld", "ppkr"],
+        "documents": ["formulir", "sip", "sprint", "tld", "ppkr", "laporan_dosis_awal"],
         "mode": "fuzzy_name",
     },
     {
@@ -294,5 +302,15 @@ DOCUMENT_FIELDS = {
         "tube_brand",
         "tube_type",
         "tube_serial_number",
+    ],
+    "laporan_dosis_awal": [
+        "hospital_name",
+        "hospital_address",
+        "usage_period",
+        "person_name",
+    ],
+    "gedung_penahan_radiasi": [
+        "hospital_name",
+        "hospital_address",
     ],
 }

@@ -66,6 +66,57 @@ def split_type_and_serial(type_serial_raw: str) -> Tuple[str, str]:
     return text, ""
 
 
+def split_project_address(raw_alamat_proyek: str) -> Tuple[str, str]:
+    """Splits raw Alamat Proyek from BAPETEN Formulir Permohonan into (nama_instansi, alamat_instansi).
+
+    In BAPETEN Formulir Permohonan:
+    - The facility / hospital name is the leading prefix of 'Alamat Proyek' (before street address).
+    - The facility address is the remaining part (street, RT/RW, subdistrict, city, etc.).
+
+    Examples:
+    - 'RS. Hermina Kepanjen, Jalan Raya Mojosari , RT 02/RW 01, Kel. Mojosari, Kec. Kepanjen , Kab. Malang, Jawa Timur'
+      -> ('RS. Hermina Kepanjen', 'Jalan Raya Mojosari , RT 02/RW 01, Kel. Mojosari, Kec. Kepanjen , Kab. Malang, Jawa Timur')
+    - 'Rumah Sakit Jiwa Aceh, Jl. Dr. T. Syarief Thayeb No. 25 , Kota Banda Aceh Aceh 23126, Telp.0651-32010...'
+      -> ('Rumah Sakit Jiwa Aceh', 'Jl. Dr. T. Syarief Thayeb No. 25 , Kota Banda Aceh Aceh 23126, Telp.0651-32010...')
+    - 'Klinik Insan Utama Balikpapan, Jl. Mayor TNI AD Ahmad Saili , Kota Balikpapan Kalimantan Timur 76124...'
+      -> ('Klinik Insan Utama Balikpapan', 'Jl. Mayor TNI AD Ahmad Saili , Kota Balikpapan Kalimantan Timur 76124...')
+    - 'RS Tk. IV Pekanbaru, Jl. Kesehatan No. 2 , Kota Pekanbaru Riau'
+      -> ('RS Tk. IV Pekanbaru', 'Jl. Kesehatan No. 2 , Kota Pekanbaru Riau')
+    """
+    if not raw_alamat_proyek:
+        return "", ""
+
+    text = clean_value(str(raw_alamat_proyek))
+    if not text:
+        return "", ""
+
+    street_indicators = r"^(?:Jl\.?|Jalan|Dusun|Desa|Komplek|Kav\.?|Gedung|Blok|RT\b|RW\b|No\.)\b"
+
+    # Strategy 1: Split on first comma if text contains comma
+    if "," in text:
+        parts = text.split(",", 1)
+        cand_name = parts[0].strip()
+        cand_addr = parts[1].strip()
+        if cand_name and not re.match(street_indicators, cand_name, re.IGNORECASE):
+            return cand_name, cand_addr
+        return "", text
+
+    # Strategy 2: If no comma, check if a street indicator keyword separates name and address
+    m = re.search(
+        r"^(.*?)\s+(?=(?:Jl\.?|Jalan|Dusun|Desa|Komplek|Kav\.?|Gedung|Blok|RT\s*\d|RW\s*\d)\b)(.+)$",
+        text,
+        re.IGNORECASE,
+    )
+    if m:
+        cand_name = m.group(1).strip().rstrip(",")
+        cand_addr = m.group(2).strip()
+        if cand_name and not re.match(street_indicators, cand_name, re.IGNORECASE):
+            return cand_name, cand_addr
+
+    return "", text
+
+
+
 def resolve_generator_columns(table: list) -> Dict[str, Any]:
     """Dynamically identifies column indices from table header row(s).
 
@@ -343,9 +394,15 @@ def extract_form_data(tables: List[Tuple[int, list]], pages_text_or_full_text: A
         "registration_date": [r"Tanggal Registrasi\s*:\s*(.+)"],
         "scope": [r"Lingkup Kegiatan\s*:\s*(.+)"],
         "institution_name": [r"Instansi\s*:\s*(.+)"],
-        "institution_address": [r"Alamat Instansi\s*:\s*(.+)"],
+        "institution_address": [
+            r"Alamat Instansi\s*:\s*([\s\S]+?)(?=\n\s*(?:Nama Proyek|[A-Z]\.|\Z))",
+            r"Alamat Instansi\s*:\s*(.+)",
+        ],
         "project_name": [r"Nama Proyek\s*:\s*(.+)"],
-        "project_address": [r"Alamat Proyek\s*:\s*(.+)"],
+        "project_address": [
+            r"Alamat Proyek\s*:\s*([\s\S]+?)(?=\n\s*(?:[A-Z]\.\s*Kelengkapan|[A-Z]\.|\bNomor Registrasi\b|\Z))",
+            r"Alamat Proyek\s*:\s*(.+)",
+        ],
     }
     header = {}
     for key, patterns in header_aliases.items():
@@ -366,9 +423,25 @@ def extract_form_data(tables: List[Tuple[int, list]], pages_text_or_full_text: A
     primary_generator = all_generator_rows[0] if all_generator_rows else parse_generator_table(tables)
 
     # For facility on formulir:
-    # Nama instansi diambil dari Instansi (institution_name), fallback ke Nama Proyek / generic
-    inst_name_obj = header.get("institution_name", {})
-    if inst_name_obj.get("value"):
+    # Nama instansi dan Alamat instansi acuan diambil dari Alamat Proyek:
+    # - Awalan Alamat Proyek -> Nama Instansi / Fasilitas (hospital_name)
+    # - Sisanya -> Alamat Instansi / Fasilitas (hospital_address)
+    proj_addr_obj = header.get("project_address", {})
+    proj_addr_val = proj_addr_obj.get("value", "")
+    proj_addr_page = proj_addr_obj.get("page", 1)
+
+    split_name, split_addr = split_project_address(proj_addr_val)
+
+    if split_name:
+        form_hospital_name = {
+            "value": split_name,
+            "page": proj_addr_page,
+            "line": None,
+            "method": "project_address_prefix",
+            "confidence": 1.0,
+        }
+    elif header.get("institution_name", {}).get("value"):
+        inst_name_obj = header["institution_name"]
         form_hospital_name = {
             "value": inst_name_obj["value"],
             "page": inst_name_obj.get("page", 1),
@@ -376,41 +449,45 @@ def extract_form_data(tables: List[Tuple[int, list]], pages_text_or_full_text: A
             "method": "header_institution_name",
             "confidence": 1.0,
         }
+    elif header.get("project_name", {}).get("value"):
+        proj_name_obj = header["project_name"]
+        form_hospital_name = {
+            "value": proj_name_obj["value"],
+            "page": proj_name_obj.get("page", 1),
+            "line": None,
+            "method": "header_project_name",
+            "confidence": 1.0,
+        }
     else:
-        proj_name_obj = header.get("project_name", {})
-        if proj_name_obj.get("value"):
-            form_hospital_name = {
-                "value": proj_name_obj["value"],
-                "page": proj_name_obj.get("page", 1),
-                "line": None,
-                "method": "header_project_name",
-                "confidence": 1.0,
-            }
-        else:
-            form_hospital_name = generic["hospital_name"]
+        form_hospital_name = generic["hospital_name"]
 
-    # Alamat instansi diambil dari Alamat Proyek (project_address), fallback ke Alamat Instansi / generic
-    proj_addr_obj = header.get("project_address", {})
-    if proj_addr_obj.get("value"):
+    if split_addr:
         form_hospital_address = {
-            "value": proj_addr_obj["value"],
-            "page": proj_addr_obj.get("page", 1),
+            "value": split_addr,
+            "page": proj_addr_page,
+            "line": None,
+            "method": "project_address_suffix",
+            "confidence": 1.0,
+        }
+    elif proj_addr_val:
+        form_hospital_address = {
+            "value": proj_addr_val,
+            "page": proj_addr_page,
             "line": None,
             "method": "header_project_address",
             "confidence": 1.0,
         }
+    elif header.get("institution_address", {}).get("value"):
+        inst_addr_obj = header["institution_address"]
+        form_hospital_address = {
+            "value": inst_addr_obj["value"],
+            "page": inst_addr_obj.get("page", 1),
+            "line": None,
+            "method": "header_institution_address",
+            "confidence": 1.0,
+        }
     else:
-        inst_addr_obj = header.get("institution_address", {})
-        if inst_addr_obj.get("value"):
-            form_hospital_address = {
-                "value": inst_addr_obj["value"],
-                "page": inst_addr_obj.get("page", 1),
-                "line": None,
-                "method": "header_institution_address",
-                "confidence": 1.0,
-            }
-        else:
-            form_hospital_address = generic["hospital_address"]
+        form_hospital_address = generic["hospital_address"]
 
     return {
         "header": header,
@@ -434,39 +511,42 @@ def build_application_from_form(
     reg_date = header.get("registration_date", {}).get("value")
     scope = header.get("scope", {}).get("value")
 
-    # Facility: Nama instansi diambil dari Instansi (institution_name)
-    # Alamat diambil dari Alamat Proyek (project_address)
-    h_name_obj = (
-        header.get("institution_name")
-        if header.get("institution_name", {}).get("value")
-        else (parsed_form.get("hospital_name") or header.get("project_name", {}))
-    )
-    fac_name = h_name_obj.get("value") if isinstance(h_name_obj, dict) else h_name_obj
-    fac_name_page = h_name_obj.get("page") if isinstance(h_name_obj, dict) else None
+    # Facility: Nama instansi dan alamat instansi diambil dari Alamat Proyek (project_address)
+    # Prefix Alamat Proyek -> Nama Instansi / Fasilitas (project_name)
+    # Sisanya -> Alamat Fasilitas (project_address)
+    h_name_val = parsed_form.get("hospital_name", {}).get("value") if isinstance(parsed_form.get("hospital_name"), dict) else parsed_form.get("hospital_name")
+    h_name_page = parsed_form.get("hospital_name", {}).get("page") if isinstance(parsed_form.get("hospital_name"), dict) else 1
 
-    h_addr_obj = (
-        header.get("project_address")
-        if header.get("project_address", {}).get("value")
-        else (parsed_form.get("hospital_address") or header.get("institution_address", {}))
-    )
-    fac_addr = h_addr_obj.get("value") if isinstance(h_addr_obj, dict) else h_addr_obj
-    fac_addr_page = h_addr_obj.get("page") if isinstance(h_addr_obj, dict) else None
+    h_addr_val = parsed_form.get("hospital_address", {}).get("value") if isinstance(parsed_form.get("hospital_address"), dict) else parsed_form.get("hospital_address")
+    h_addr_page = parsed_form.get("hospital_address", {}).get("page") if isinstance(parsed_form.get("hospital_address"), dict) else 1
+
+    if not h_name_val:
+        proj_addr_val = header.get("project_address", {}).get("value", "")
+        split_n, _ = split_project_address(proj_addr_val)
+        h_name_val = split_n or header.get("institution_name", {}).get("value") or header.get("project_name", {}).get("value") or ""
+        h_name_page = header.get("project_address", {}).get("page") or 1
+
+    if not h_addr_val:
+        proj_addr_val = header.get("project_address", {}).get("value", "")
+        _, split_a = split_project_address(proj_addr_val)
+        h_addr_val = split_a or proj_addr_val or header.get("institution_address", {}).get("value") or ""
+        h_addr_page = header.get("project_address", {}).get("page") or 1
 
     facility = FacilityEntity(
         id="facility_1",
         project_name=ExtractedField[str].from_value(
-            value=fac_name,
+            value=h_name_val,
             document_type="formulir",
             file_name=file_name,
-            page=fac_name_page,
-            extraction_method="native_text_regex",
+            page=h_name_page,
+            extraction_method="project_address_prefix",
         ),
         project_address=ExtractedField[str].from_value(
-            value=fac_addr,
+            value=h_addr_val,
             document_type="formulir",
             file_name=file_name,
-            page=fac_addr_page,
-            extraction_method="native_text_regex",
+            page=h_addr_page,
+            extraction_method="project_address_suffix",
         ),
         institution_name=ExtractedField[str].from_value(
             value=header.get("institution_name", {}).get("value"),

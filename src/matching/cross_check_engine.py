@@ -333,7 +333,7 @@ def cross_check_facility(
     facility_docs = [
         "formulir", "sprint", "tld", "sistem_manajemen",
         "program_perawatan", "ppkr", "paparan_radiasi",
-        "uji_fungsi", "uji_kesesuaian",
+        "uji_fungsi", "uji_kesesuaian", "laporan_dosis_awal", "gedung_penahan_radiasi",
     ]
 
     name_sources = _collect_field_sources(extractions, facility_docs, "hospital_name")
@@ -406,9 +406,11 @@ def cross_check_personnel(
         prof_val = person.profession.value or ""
         norm_target = normalize_person_name(target_name)
 
-        is_ppr = "PPR" in prof_val.upper() or any(
-            fuzz.token_sort_ratio(norm_target, normalize_person_name(p.name.value or "")) >= 75
-            for p in (ppr_list or [])
+        is_ppr = "PPR" in prof_val.upper() or "PROTEKSI" in prof_val.upper() or (
+            not prof_val and any(
+                fuzz.token_sort_ratio(norm_target, normalize_person_name(p.name.value or "")) >= 75
+                for p in (ppr_list or [])
+            )
         )
 
         p_sources = []
@@ -448,115 +450,123 @@ def cross_check_personnel(
             )
 
         # 2. Check matching SIP documents
-        for doc in extractions.get("sip", []):
-            f = doc.get("fields", {})
-            sip_name = str(f.get("person_name", {}).get("value") or "").strip()
-            score, _, _ = compare_two_values(target_name, sip_name, mode="fuzzy_name")
-            if score and score >= 75.0:
-                p_sources.append(
-                    SourceEvidence(
-                        document_type="sip",
-                        document_name=doc.get("file_name", "SIP.pdf"),
-                        page=f.get("person_name", {}).get("page"),
-                        value=sip_name,
-                    )
-                )
-                sip_prof = str(f.get("profession", {}).get("value") or "").strip()
-                if sip_prof:
-                    prof_sources.append(
+        # SIP (Surat Izin Praktik) is for clinical personnel (Dokter, Radiografer, Fisikawan Medik).
+        # A PPR's credential is SIB (Surat Izin Bekerja), verified in step 3.
+        # Do not attach clinical SIP to a PPR entity, preventing false positive discrepancies
+        # when staff members share the same name or hold distinct roles.
+        if not is_ppr:
+            for doc in extractions.get("sip", []):
+                f = doc.get("fields", {})
+                sip_name = str(f.get("person_name", {}).get("value") or "").strip()
+                score, _, _ = compare_two_values(target_name, sip_name, mode="fuzzy_name")
+                if score and score >= 75.0:
+                    p_sources.append(
                         SourceEvidence(
                             document_type="sip",
                             document_name=doc.get("file_name", "SIP.pdf"),
-                            page=f.get("profession", {}).get("page"),
-                            value=sip_prof,
+                            page=f.get("person_name", {}).get("page"),
+                            value=sip_name,
                         )
                     )
-                sip_valid = str(f.get("valid_until", {}).get("value") or "").strip()
-                if sip_valid:
-                    valid_sources.append(
-                        SourceEvidence(
-                            document_type="sip",
-                            document_name=doc.get("file_name", "SIP.pdf"),
-                            page=f.get("valid_until", {}).get("page"),
-                            value=sip_valid,
+                    sip_prof = str(f.get("profession", {}).get("value") or "").strip()
+                    if sip_prof:
+                        prof_sources.append(
+                            SourceEvidence(
+                                document_type="sip",
+                                document_name=doc.get("file_name", "SIP.pdf"),
+                                page=f.get("profession", {}).get("page"),
+                                value=sip_prof,
+                            )
                         )
-                    )
-                sip_loc = str(f.get("practice_location", {}).get("value") or "").strip()
-                if sip_loc:
-                    loc_sources.append(
-                        SourceEvidence(
-                            document_type="sip",
-                            document_name=doc.get("file_name", "SIP.pdf"),
-                            page=f.get("practice_location", {}).get("page"),
-                            value=sip_loc,
+                    sip_valid = str(f.get("valid_until", {}).get("value") or "").strip()
+                    if sip_valid:
+                        valid_sources.append(
+                            SourceEvidence(
+                                document_type="sip",
+                                document_name=doc.get("file_name", "SIP.pdf"),
+                                page=f.get("valid_until", {}).get("page"),
+                                value=sip_valid,
+                            )
                         )
-                    )
+                    sip_loc = str(f.get("practice_location", {}).get("value") or "").strip()
+                    if sip_loc:
+                        loc_sources.append(
+                            SourceEvidence(
+                                document_type="sip",
+                                document_name=doc.get("file_name", "SIP.pdf"),
+                                page=f.get("practice_location", {}).get("page"),
+                                value=sip_loc,
+                            )
+                        )
 
         # 3. Check matching SIB documents (PPR)
-        for doc in extractions.get("sib", []):
-            f = doc.get("fields", {})
-            sib_name = str(f.get("ppr_name", {}).get("value") or "").strip()
-            score, _, _ = compare_two_values(target_name, sib_name, mode="fuzzy_name")
-            if (score and score >= 75.0) or (is_ppr and not p_sources and sib_name):
-                p_sources.append(
-                    SourceEvidence(
-                        document_type="sib",
-                        document_name=doc.get("file_name", "SIB.pdf"),
-                        page=f.get("ppr_name", {}).get("page"),
-                        value=sib_name,
-                    )
-                )
-                ppr_sources.append(
-                    SourceEvidence(
-                        document_type="sib",
-                        document_name=doc.get("file_name", "SIB.pdf"),
-                        page=f.get("ppr_name", {}).get("page"),
-                        value=sib_name,
-                    )
-                )
-                sib_prof = str(f.get("profession", {}).get("value") or "").strip()
-                if sib_prof:
-                    prof_sources.append(
+        if is_ppr:
+            for doc in extractions.get("sib", []):
+                f = doc.get("fields", {})
+                sib_name = str(f.get("ppr_name", {}).get("value") or f.get("person_name", {}).get("value") or "").strip()
+                score, _, _ = compare_two_values(target_name, sib_name, mode="fuzzy_name")
+                if (score and score >= 75.0) or (not p_sources and sib_name):
+                    p_sources.append(
                         SourceEvidence(
                             document_type="sib",
                             document_name=doc.get("file_name", "SIB.pdf"),
-                            page=f.get("profession", {}).get("page"),
-                            value=sib_prof,
+                            page=f.get("ppr_name", {}).get("page") or f.get("person_name", {}).get("page"),
+                            value=sib_name,
                         )
                     )
-                sib_valid = str(f.get("valid_until", {}).get("value") or "").strip()
-                if sib_valid:
-                    valid_sources.append(
+                    ppr_sources.append(
                         SourceEvidence(
                             document_type="sib",
                             document_name=doc.get("file_name", "SIB.pdf"),
-                            page=f.get("valid_until", {}).get("page"),
-                            value=sib_valid,
+                            page=f.get("ppr_name", {}).get("page") or f.get("person_name", {}).get("page"),
+                            value=sib_name,
+                        )
+                    )
+                    sib_prof = str(f.get("profession", {}).get("value") or "").strip()
+                    if sib_prof:
+                        prof_sources.append(
+                            SourceEvidence(
+                                document_type="sib",
+                                document_name=doc.get("file_name", "SIB.pdf"),
+                                page=f.get("profession", {}).get("page"),
+                                value=sib_prof,
+                            )
+                        )
+                    sib_valid = str(f.get("valid_until", {}).get("value") or "").strip()
+                    if sib_valid:
+                        valid_sources.append(
+                            SourceEvidence(
+                                document_type="sib",
+                                document_name=doc.get("file_name", "SIB.pdf"),
+                                page=f.get("valid_until", {}).get("page"),
+                                value=sib_valid,
+                            )
+                        )
+
+        # 4. Check matching Sprint documents (PPR)
+        if is_ppr:
+            for doc in extractions.get("sprint", []):
+                f = doc.get("fields", {})
+                sp_name = str(f.get("ppr_name", {}).get("value") or f.get("person_name", {}).get("value") or "").strip()
+                score, _, _ = compare_two_values(target_name, sp_name, mode="fuzzy_name")
+                if (score and score >= 75.0) or sp_name:
+                    ppr_sources.append(
+                        SourceEvidence(
+                            document_type="sprint",
+                            document_name=doc.get("file_name", "Sprint.pdf"),
+                            page=f.get("ppr_name", {}).get("page") or f.get("person_name", {}).get("page"),
+                            value=sp_name,
+                        )
+                    )
+                    p_sources.append(
+                        SourceEvidence(
+                            document_type="sprint",
+                            document_name=doc.get("file_name", "Sprint.pdf"),
+                            page=f.get("ppr_name", {}).get("page") or f.get("person_name", {}).get("page"),
+                            value=sp_name,
                         )
                     )
 
-        # 4. Check matching Sprint documents (PPR)
-        for doc in extractions.get("sprint", []):
-            f = doc.get("fields", {})
-            sp_name = str(f.get("ppr_name", {}).get("value") or "").strip()
-            score, _, _ = compare_two_values(target_name, sp_name, mode="fuzzy_name")
-            if (score and score >= 75.0) or (is_ppr and sp_name):
-                ppr_sources.append(
-                    SourceEvidence(
-                        document_type="sprint",
-                        document_name=doc.get("file_name", "Sprint.pdf"),
-                        page=f.get("ppr_name", {}).get("page"),
-                        value=sp_name,
-                    )
-                )
-                p_sources.append(
-                    SourceEvidence(
-                        document_type="sprint",
-                        document_name=doc.get("file_name", "Sprint.pdf"),
-                        page=f.get("ppr_name", {}).get("page"),
-                        value=sp_name,
-                    )
-                )
 
         # 5. Check matching TLD documents
         for doc in extractions.get("tld", []):
@@ -564,14 +574,40 @@ def cross_check_personnel(
             tld_name = str(f.get("person_name", {}).get("value") or "").strip()
             score, _, _ = compare_two_values(target_name, tld_name, mode="fuzzy_name")
             if score and score >= 75.0:
-                p_sources.append(
-                    SourceEvidence(
-                        document_type="tld",
-                        document_name=doc.get("file_name", "TLD.pdf"),
-                        page=f.get("person_name", {}).get("page"),
-                        value=tld_name,
-                    )
+                tld_ev = SourceEvidence(
+                    document_type="tld",
+                    document_name=doc.get("file_name", "TLD.pdf"),
+                    page=f.get("person_name", {}).get("page"),
+                    value=tld_name,
                 )
+                p_sources.append(tld_ev)
+                if is_ppr:
+                    ppr_sources.append(tld_ev)
+
+        # 5b. Check matching Laporan Dosis Awal documents
+        for doc in extractions.get("laporan_dosis_awal", []):
+            f = doc.get("fields", {})
+            file_name = doc.get("file_name", "Laporan_Dosis_Awal.pdf")
+            cand_names = []
+            if f.get("all_personnel"):
+                cand_names.extend(f["all_personnel"])
+            single_n = str(f.get("person_name", {}).get("value") or "").strip()
+            if single_n and single_n not in cand_names and single_n not in ("-", "—"):
+                cand_names.append(single_n)
+
+            for cn in cand_names:
+                score, _, _ = compare_two_values(target_name, cn, mode="fuzzy_name")
+                if score and score >= 75.0:
+                    dos_ev = SourceEvidence(
+                        document_type="laporan_dosis_awal",
+                        document_name=file_name,
+                        page=f.get("person_name", {}).get("page") or 1,
+                        value=cn,
+                    )
+                    p_sources.append(dos_ev)
+                    if is_ppr:
+                        ppr_sources.append(dos_ev)
+                    break
 
         # 6. Check matching PPKR documents
         for doc in extractions.get("ppkr", []):
@@ -706,11 +742,13 @@ def cross_check_personnel(
         elif any(f.status == MatchingStatus.PERLU_REVIEW for f in fields_map.values()):
             overall = MatchingStatus.PERLU_REVIEW
 
+        npr_val = person.npr.value if person.npr and person.npr.value else ""
+        npr_suffix = f", NPR: {npr_val}" if npr_val else ""
         personnel_checks.append(
             EntityCrossCheck(
                 category="personnel",
                 entity_id=person.id,
-                entity_label=f"Personel #{idx}: {target_name} ({prof_val or 'Staf'})",
+                entity_label=f"Personel #{idx}: {target_name} ({prof_val or 'Staf'}{npr_suffix})",
                 status=overall,
                 fields=fields_map,
             )
@@ -743,14 +781,14 @@ def cross_check_ppr(
         # Check SIB
         for doc in extractions.get("sib", []):
             f = doc.get("fields", {})
-            sib_name = str(f.get("ppr_name", {}).get("value") or "").strip()
+            sib_name = str(f.get("ppr_name", {}).get("value") or f.get("person_name", {}).get("value") or "").strip()
             score, _, _ = compare_two_values(target_name, sib_name, mode="fuzzy_name")
             if score and score >= 75.0:
                 ppr_sources.append(
                     SourceEvidence(
                         document_type="sib",
                         document_name=doc.get("file_name", "SIB.pdf"),
-                        page=f.get("ppr_name", {}).get("page"),
+                        page=f.get("ppr_name", {}).get("page") or f.get("person_name", {}).get("page"),
                         value=sib_name,
                     )
                 )
@@ -758,17 +796,18 @@ def cross_check_ppr(
         # Check Sprint
         for doc in extractions.get("sprint", []):
             f = doc.get("fields", {})
-            sp_name = str(f.get("ppr_name", {}).get("value") or "").strip()
+            sp_name = str(f.get("ppr_name", {}).get("value") or f.get("person_name", {}).get("value") or "").strip()
             score, _, _ = compare_two_values(target_name, sp_name, mode="fuzzy_name")
             if score and score >= 75.0:
                 ppr_sources.append(
                     SourceEvidence(
                         document_type="sprint",
                         document_name=doc.get("file_name", "Sprint.pdf"),
-                        page=f.get("ppr_name", {}).get("page"),
+                        page=f.get("ppr_name", {}).get("page") or f.get("person_name", {}).get("page"),
                         value=sp_name,
                     )
                 )
+
 
         name_check = evaluate_field_sources("ppr_name", "Nama PPR", ppr_sources, mode="fuzzy_name")
         fields_map = {"ppr_name": name_check}
