@@ -7,6 +7,8 @@ __pycache__/
 data/input/*
 data/output/*
 data/samples/*
+data/uploads/*
+data/database.sqlite
 logs/*
 *.db
 *.sqlite
