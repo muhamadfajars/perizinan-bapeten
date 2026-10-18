@@ -11,7 +11,7 @@ DOCUMENT_TYPES = {
         "kind": "pdf",
     },
     "sip": {
-        "name": "Surat Izin Praktik (SIP)",
+        "name": "Surat Izin Praktik (SIP) / SIKR",
         "kind": "pdf",
     },
     "sprint": {
@@ -19,9 +19,10 @@ DOCUMENT_TYPES = {
         "kind": "pdf",
     },
     "sib": {
-        "name": "SIB",
+        "name": "SIB / Sertifikat Kompetensi PPR",
         "kind": "pdf",
     },
+
     "spesifikasi_pesawat": {
         "name": "Spesifikasi Pesawat Sinar-X",
         "kind": "pdf",

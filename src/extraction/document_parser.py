@@ -345,13 +345,15 @@ def extract_sib_data(pages_text):
             # 2. profession
             if not profession:
                 m_prof = re.search(
-                    r"(?:Sebagai|Kualifikasi|Klasifikasi|Profesi|Keahlian|Jabatan|Jenis\s+SIB)\s*[:=\-–]?\s*([^\n\r]+)$",
+                    r"(?:Sebagai|Kualifikasi|Klasifikasi(?:/Classification)?|Profesi|Keahlian|Jabatan|Jenis\s+SIB)\s*[:=\-–]?\s*([^\n\r]*)$",
                     line,
                     re.IGNORECASE,
                 )
                 if m_prof:
                     cand_prof = clean_value(m_prof.group(1)).strip(" :;-,")
-                    if cand_prof:
+                    if not cand_prof and idx + 1 < len(lines):
+                        cand_prof = clean_value(lines[idx + 1]).strip(" :;-,")
+                    if cand_prof and not re.search(r"^(?:Nama|Nomor|Nilai|Ujian|Date|Tanggal)\b", cand_prof, re.I):
                         profession = cand_prof
                         prof_page = p_idx
                 elif re.match(r"^(?:Petugas\s+Proteksi\s+Radiasi|PPR)\b", line, re.I):
@@ -423,6 +425,86 @@ def extract_sib_data(pages_text):
     }
 
 
+def extract_sip_data(pages_text: List[str]) -> Dict[str, Any]:
+    """Robustly extracts person name, profession, valid_until, and practice location
+    from Surat Izin Praktik (SIP) or Surat Izin Kerja Radiografer (SIKR).
+    """
+    all_text = "\n".join(pages_text or [])
+
+    # 1. person_name
+    person_name = ""
+    name_page = None
+    for p_idx, page in enumerate(pages_text or [], start=1):
+        lines = [l.strip() for l in str(page or "").splitlines() if l.strip()]
+        for idx, line in enumerate(lines):
+            # 1a. Nama : KHAIRUNNISA
+            m_name = re.search(r"^\s*Nama\s*(?:Lengkap)?\s*[:=\-–]\s*([A-Za-z .,'\-]+)$", line, re.I)
+            if m_name:
+                cand = clean_value(m_name.group(1)).strip(" :;-,")
+                if len(cand) >= 3 and not re.search(r"^(?:Dokter|Radiografer|Dinas|Pemerintah)\b", cand, re.I):
+                    person_name = cand
+                    name_page = p_idx
+                    break
+            # 1b. SIKR layout: line is '...memberikan izin Kerja kepada:' and candidate is next line
+            if re.search(r"memberikan\s+izin\s+(?:Kerja|Praktik|Praktek)\s+kepada\s*[:=\-–]?$", line, re.I):
+                if idx + 1 < len(lines):
+                    cand = clean_value(lines[idx + 1]).strip(" :;-,")
+                    if len(cand) >= 3 and not re.search(r"^(?:Tempat|Alamat|Nomor|Untuk)\b", cand, re.I):
+                        person_name = cand
+                        name_page = p_idx
+                        break
+        if person_name:
+            break
+
+    # 2. profession
+    profession = ""
+    prof_page = None
+    m_prof = re.search(r"(?:Profesi|Keahlian|Jabatan)\s*[:=\-–]\s*([^\n\r]+)", all_text, re.I)
+    if m_prof:
+        profession = clean_value(m_prof.group(1)).strip(" :;-,")
+        prof_page = _find_page_containing(pages_text, re.escape(profession))
+    else:
+        m_role = re.search(r"(?:sebagai|pekerjaan\s+sebagai)\s*[:=\-–]?\s*(Radiografer|Dokter\s+Spesialis\s+Radiologi|Fisikawan\s+Medik|Dokter)", all_text, re.I)
+        if m_role:
+            profession = clean_value(m_role.group(1)).strip(" :;-,")
+            prof_page = _find_page_containing(pages_text, re.escape(profession))
+        elif re.search(r"\b(?:SIKR|Surat\s+Izin\s+Kerja\s+Radiografer)\b", all_text, re.I):
+            profession = "Radiografer"
+            prof_page = 1
+
+    # 3. valid_until
+    valid_until = ""
+    valid_page = None
+    m_valid = re.search(
+        r"(?:berlaku\s+sampai(?:\s+dengan)?(?:\s+tanggal)?|masa\s+berlaku)\s*[:=\-–]?\s*([0-9]{1,2}[ \t]+[A-Za-z]+[ \t]+[0-9]{4}|[0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{4})",
+        all_text,
+        re.I,
+    )
+    if m_valid:
+        valid_until = normalize_date(clean_value(m_valid.group(1)).strip(" :;-,."))
+        valid_page = _find_page_containing(pages_text, re.escape(m_valid.group(1).strip()))
+
+    # 4. practice_location
+    practice_location = ""
+    loc_page = None
+    m_loc = re.search(r"(?:Alamat\s+Praktik|Alamat\s+Praktek|Tempat\s+Praktik|Tempat\s+Praktek)\s*[:=\-–]\s*([^\n\r]+)", all_text, re.I)
+    if m_loc:
+        practice_location = clean_value(m_loc.group(1)).strip(" :;-,")
+        loc_page = _find_page_containing(pages_text, re.escape(practice_location))
+    else:
+        m_at = re.search(r"(?:sebagai\s+Radiografer\s+di\s+|di\s+)(RS\.?\s+[A-Za-z0-9 .,/'-]+|Rumah\s+Sakit\s+[A-Za-z0-9 .,/'-]+|Puskesmas\s+[A-Za-z0-9 .,/'-]+|Klinik\s+[A-Za-z0-9 .,/'-]+)", all_text, re.I)
+        if m_at:
+            practice_location = clean_value(m_at.group(1)).strip(" :;-,")
+            loc_page = _find_page_containing(pages_text, re.escape(practice_location))
+
+    return {
+        "person_name": {"value": person_name, "page": name_page, "method": "native_text_regex" if person_name else "not_found", "confidence": 1.0 if person_name else None},
+        "profession": {"value": profession, "page": prof_page, "method": "native_text_regex" if profession else "not_found", "confidence": 1.0 if profession else None},
+        "valid_until": {"value": valid_until, "page": valid_page, "method": "native_text_regex" if valid_until else "not_found", "confidence": 1.0 if valid_until else None},
+        "practice_location": {"value": practice_location, "page": loc_page, "method": "native_text_regex" if practice_location else "not_found", "confidence": 1.0 if practice_location else None},
+    }
+
+
 def extract_sprint_data(pages_text: List[str]) -> Dict[str, Any]:
     """Robustly extracts PPR name and Approval/Signer from Surat Perintah (Sprint) / SK Penunjukan PPR."""
     ppr_name = ""
@@ -462,7 +544,9 @@ def extract_sprint_data(pages_text: List[str]) -> Dict[str, Any]:
             r"TENTANG\s+PENUNJUK[K]?AN[^\n\r]*?\s*(?:SDR/?I\.?\s+|SAUDARA/?I\.?\s+)?([A-Za-z .,'\-]+?)\s+SEBAGAI\s+PETUGAS\s+PROTEKSI\s+RADIASI",
             r"bahwa\s+(?:Sdr/?i\.?\s+|Saudara/?i\.?\s+)?([A-Za-z .,'\-]+?)\s+dinilai\s+mampu\s+dan\s+cakap\s+sebagai\s+Petugas\s+Proteksi",
             r"DIPERINTAHKAN\s*\n+\s*Kepada\s*[:\-–]?\s*([A-Za-z .,'\-]+)",
+            r"(?:menugaskan\s+kepada|menugaskan)\s*[:\-–]?\s*\n*(?:Nama\s*(?:Lengkap)?\s*[:\-–]?\s*)?([A-Za-z .,'\-]+)",
         ]
+
         for pat in sk_patterns:
             m = re.search(pat, full_page, re.I | re.M)
             if m:
@@ -1307,6 +1391,11 @@ def extract_laporan_dosis_awal_data(pages_text, tables=None, context=None):
     # 3. usage_period
     m_period = re.search(r"(?:Untuk\s+Rencana\s+Periode\s+Pemakaian|Periode\s+Pemakaian|Rencana\s+Periode)\s*[:=\-–]?\s*([^\n\r]+)", all_text, re.I)
     usage_period = clean_value(m_period.group(1)).strip(" :;-,") if m_period else ""
+    if not usage_period or usage_period in ("-", "—"):
+        m_alt_period = re.search(r"(?:Tanggal\s+Pelaksanaan|Tanggal\s+Uji)\s*[:=\-–]?\s*([^\n\r]+)", all_text, re.I)
+        if m_alt_period:
+            usage_period = clean_value(m_alt_period.group(1)).strip(" :;-,")
+
 
     # 4. person_name / personnel list
     personnel_names = []
@@ -1516,12 +1605,7 @@ def parse_document(doc_type, pages_text, tables=None, context=None):
     special = {}
 
     if doc_type == "sip":
-        special = {
-            "person_name": _first_match(pages_text, [_rx("Nama")]),
-            "profession": _first_match(pages_text, [_rx("Profesi|Keahlian")]),
-            "valid_until": _first_match(pages_text, [r"(?:berlaku sampai(?: dengan)?|masa berlaku)[ \t]*:?[ \t]*(.+)"]),
-            "practice_location": _first_match(pages_text, [_rx("Alamat Praktik|Alamat Praktek|Tempat Praktik|Tempat Praktek")]),
-        }
+        special = extract_sip_data(pages_text)
     elif doc_type == "sprint":
         special = extract_sprint_data(pages_text)
     elif doc_type == "sib":

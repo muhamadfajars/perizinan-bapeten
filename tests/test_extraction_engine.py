@@ -1328,6 +1328,82 @@ def test_ppkr_extracts_spaced_tube_type_and_serial_number():
     assert "25D0610" in f["tube_type_serial"]["value"]
 
 
+def test_extract_serkom_ppr_as_sib():
+    from src.extraction.document_parser import parse_document
+    serkom_p1 = """
+Sertifikat Kompetensi Petugas Proteksi Radiasi
+Radiation Protection Officer Competency Certificate
+Nomor Sertifikat/Certificate Number: 464887.223.10.101125
+Nama/Name : Kharis Amin
+Tempat, Tanggal Lahir/Place, Date of Birth : Padang Unoi, 12 September 1993
+LULUS/HAS PASSED
+Ujian Sertifikasi Kompetensi Petugas Proteksi Radiasi
+Berlaku sampai dengan/Valid until :
+09 November 2030 / 9th November 2030
+Jakarta, 10 November 2025
+a.n. Kepala BAPETEN
+Direktur Perizinan Fasilitas Radiasi dan Zat Radioaktif
+"""
+    serkom_p2 = """
+Nomor Sertifikat/Certificate Number: 464887.223.10.101125
+Klasifikasi/Classification:
+PPR Radiologi Diagnostik dan atau Intervensional
+"""
+    res = parse_document("sib", [serkom_p1, serkom_p2])
+    f = res["fields"]
+    assert f["ppr_name"]["value"] == "Kharis Amin"
+    assert "09/11/2030" in f["valid_until"]["value"]
+    assert "Petugas Proteksi Radiasi" in f["profession"]["value"]
+
+
+
+def test_extract_sip_radiografer():
+    from src.extraction.document_parser import parse_document
+    sip_txt = """
+PEMERINTAH KOTA BANDA ACEH
+DINAS PENANAMAN MODAL DAN PELAYANAN TERPADU SATU PINTU
+SURAT IZIN PRAKTIK (SIP)
+Nomor: N11712024009
+Memberi Izin kepada:
+Nama : KHAIRUNNISA, A.Md.Rad
+Tempat/ Tanggal Lahir : Aceh Utara, 23 Mei 1994
+Profesi : Radiografer
+Alamat Praktik : RS Jiwa Aceh, Jl. DR. T. Syarief Thayeb No.25 Desa/Kel. Bandar Baru, Kec. Kuta Alam, Kota Banda Aceh, Provinsi Aceh
+Nomor STR : JG00000331367265
+Surat Izin Praktik (SIP) ini berlaku sampai dengan tanggal 03 Juli 2029
+"""
+    res = parse_document("sip", [sip_txt])
+    f = res["fields"]
+    assert f["person_name"]["value"] == "KHAIRUNNISA, A.Md.Rad"
+    assert f["profession"]["value"] == "Radiografer"
+    assert "RS Jiwa Aceh" in f["practice_location"]["value"]
+    assert "03/07/2029" in f["valid_until"]["value"]
+
+
+def test_extract_sikr_radiografer():
+    from src.extraction.document_parser import parse_document
+    sikr_txt = """
+PEMERINTAH KOTA BANDA ACEH
+DINAS PENANAMAN MODAL DAN PELAYANAN TERPADU SATU PINTU (DPM-PTSP)
+SURAT IZIN KERJA RADIOGRAFER (SIKR)
+No. 446/98.SIKR/2023
+Kepala Dinas Penanaman Modal dan Pelayanan Terpadu Satu Pintu Kota Banda Aceh memberikan izin Kerja kepada:
+JUNAIDI, AMR
+Tempat/Tgl. Lahir : Bireuen, 1 Mei 1983
+Nomor STRR : 010751223-4675384
+Untuk menjalankan pekerjaan sebagai Radiografer di RS. JIWA ACEH Jl. T. Syarief Thayeb No. 25 Gp. Bandar Baru Kec.Kuta Alam Kota Banda Aceh
+Surat Izin Kerja Radiografer (SIKR) ini berlaku sampai dengan tanggal 1 Mei 2028
+"""
+    res = parse_document("sip", [sikr_txt])
+    f = res["fields"]
+    assert f["person_name"]["value"] == "JUNAIDI, AMR"
+    assert f["profession"]["value"] == "Radiografer"
+    assert "RS. JIWA ACEH" in f["practice_location"]["value"]
+    assert "01/05/2028" in f["valid_until"]["value"]
+
+
+
+
 
 
 

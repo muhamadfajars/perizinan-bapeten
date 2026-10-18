@@ -18,11 +18,12 @@ FILENAME_PATTERNS = [
     (r"\b(?:sistem[\s_]+manajemen|manajemen[\s_]+fasilitas|quality[\s_]+management|dokumen[\s_]+manajemen)\b", "sistem_manajemen"),
     (r"\b(?:ppkr\b|proteksi[\s_]+keselamatan|program[\s_]+proteksi|keselamatan[\s_]+radiasi|radiation[\s_]+safety|radiation[\s_]+protection|proteksi[\s_]+radiasi)\b", "ppkr"),
     (r"\b(?:formulir|ktun|form[\s_]+permohonan|permohonan[\s_]+izin|surat[\s_]+permohonan|aplikasi[\s_]+izin)\b", "formulir"),
-    (r"\b(?:sip\b|surat[\s_]+izin[\s_]+prakt?ik|izin[\s_]+prakt?ik|izin[\s_]+praktek|sip[\s_]+dokter|sip[\s_]+dr)\b", "sip"),
-    (r"\b(?:sprint\b|sprin\b|surat[\s_]+perintah|surat[\s_]+tugas|sk[\s_]+ppr|sk[\s_]+petugas|sk[\s_]+penunjukan|penunjukan[\s_]+ppr|penetapan[\s_]+ppr)\b", "sprint"),
-    (r"\b(?:sib\b|surat[\s_]+izin[\s_]+bekerja|izin[\s_]+bekerja|lisensi[\s_]+ppr|sertifikat[\s_]+ppr|kartu[\s_]+sib)\b", "sib"),
-    (r"\b(?:laporan[\s_]+dosis[\s_]+awal|dosis[\s_]+awal|lencana[\s_]+osl|oslindo|laporan[\s_]+dosis|osl\b)\b", "laporan_dosis_awal"),
+    (r"\b(?:sip\b|sikr\b|surat[\s_]+izin[\s_]+prakt?ik|surat[\s_]+izin[\s_]+kerja|izin[\s_]+prakt?ik|izin[\s_]+praktek|izin[\s_]+kerja|sip[\s_]+dokter|sip[\s_]+dr|sikr[\s_]+radiografer|sip[\s_]+radiografer)\b", "sip"),
+    (r"\b(?:sprint\b|sprin\b|surat[\s_]+perintah|surat[\s_]+tugas|sk[\s_]+ppr|sk[\s_]+petugas|sk[\s_]+penunjukan|penunjukan[\s_]+ppr|penetapan[\s_]+ppr|penunjukan[\s_]+tugas)\b", "sprint"),
+    (r"\b(?:sib\b|surat[\s_]+izin[\s_]+bekerja|izin[\s_]+bekerja|lisensi[\s_]+ppr|sertifikat[\s_]+ppr|kartu[\s_]+sib|sertifikat[\s_]+kompetensi[\s_]+(?:petugas[\s_]+proteksi|ppr)|sertifikat[\s_]+kompetensi)\b", "sib"),
+    (r"\b(?:laporan[\s_]+dosis[\s_]+awal|dosis[\s_]+awal|lencana[\s_]+osl|oslindo|laporan[\s_]+dosis|osl\b|zero[\s_]+check|zerocheck|dosis[\s_]+perorangan)\b", "laporan_dosis_awal"),
     (r"\b(?:rencana[\s_]+teknis|gedung[\s_]+penahan|penahan[\s_]+radiasi|ruang[\s_]+penahan|dinding[\s_]+penahan|shielding)\b", "gedung_penahan_radiasi"),
+
     (r"\b(?:tld\b|dosimeter|nuklindo|dosis[\s_]+radiasi|kartu[\s_]+dosis|evaluasi[\s_]+dosis)\b", "tld"),
     (r"\b(?:persetujuan[\s_]+impor|persetujuan[\s_]+import|izin[\s_]+impor|izin[\s_]+import|surat[\s_]+impor|surat[\s_]+import|impor\b|import\b|\bpi[\s_]*(?:alat|sinar|xray|bapeten)\b)\b", "persetujuan_import"),
     (r"\b(?:spesifikasi|spek\b|specification|manual[\s_]+book|datasheet|data[\s_]+sheet|brosur|brochure|technical[\s_]+spec|user[\s_]+manual)\b", "spesifikasi_pesawat"),
@@ -38,7 +39,7 @@ FILENAME_PATTERNS = [
 
 # Content keyword patterns from the text of a PDF
 CONTENT_PATTERNS = [
-    (r"LAPORAN\s+DOSIS\s+AWAL|LENCANA\s+OSL|OSLINDO|MAQASS\s+TECHRAD", "laporan_dosis_awal"),
+    (r"LAPORAN\s+DOSIS\s+AWAL|LENCANA\s+OSL|OSLINDO|MAQASS\s+TECHRAD|ZERO\s+CHECK|DOSIS\s+PERORANGAN\s+DENGAN\s+LENCANA\s+TLD", "laporan_dosis_awal"),
     (r"RENCANA\s+TEKNIS\s+FASILITAS|GEDUNG\s+PENAHAN\s+RADIASI|PENAHAN\s+RADIASI\s+RUANG\s+RADIOLOGI|DINDING\s+PENAHAN\s+RADIASI", "gedung_penahan_radiasi"),
     (r"SISTEM\s+MANAJEMEN\s+FASILITAS|SISTEM\s+MANAJEMEN\s+KESELAMATAN|SISTEM\s+MANAJEMEN\b", "sistem_manajemen"),
     (r"PROGRAM\s+PERAWATAN\s+PESAWAT\s+SINAR|PROGRAM\s+PERAWATAN\b", "program_perawatan"),
@@ -46,9 +47,9 @@ CONTENT_PATTERNS = [
     (r"PENGUKURAN\s+PAPARAN|PAPARAN\s+RADIASI|KEBOCORAN\s+TABUNG|DENAH\s+RUANG|SURVEY\s+METER", "paparan_radiasi"),
     (r"FORMULIR\s+PERMOHONAN|PERMOHONAN\s+IZIN\s+PEMANFAATAN", "formulir"),
     (r"NUKLINDOLAB|KOPERASI\s+JASA\s+KESELAMATAN|TLD\s+BETA|DOSIS|DOSIMETER", "tld"),
-    (r"SURAT\s+IZIN\s+PRAKT?IK|\bSIP\b|TEMPAT\s+PRAKT?IK", "sip"),
-    (r"SURAT\s+PERINTAH|\bSPRINT\b|\bSPRIN\b|MEMERINTAHKAN\s*:", "sprint"),
-    (r"SURAT\s+IZIN\s+BEKERJA|\bSIB\b|PETUGAS\s+PROTEKSI\s+RADIASI\s+BIDANG|WORKING\s+PERMIT\s+OF\s+OFFICER", "sib"),
+    (r"SURAT\s+IZIN\s+PRAKT?IK|\bSIP\b|TEMPAT\s+PRAKT?IK|SURAT\s+IZIN\s+KERJA\s+RADIOGRAFER|\bSIKR\b|SURAT\s+IZIN\s+KERJA", "sip"),
+    (r"SURAT\s+PERINTAH|\bSPRINT\b|\bSPRIN\b|MEMERINTAHKAN\s*:|SURAT\s+PENUNJUKAN\s+TUGAS|SURAT\s+TUGAS|MENUGASKAN\s+KEPADA", "sprint"),
+    (r"SURAT\s+IZIN\s+BEKERJA|\bSIB\b|PETUGAS\s+PROTEKSI\s+RADIASI\s+BIDANG|WORKING\s+PERMIT\s+OF\s+OFFICER|SERTIFIKAT\s+KOMPETENSI\s+PETUGAS\s+PROTEKSI\s+RADIASI|RADIATION\s+PROTECTION\s+OFFICER\s+COMPETENCY|UJIAN\s+SERTIFIKASI\s+KOMPETENSI", "sib"),
     (r"HASIL\s+UJI\s+FUNGSI|LEMBAR\s+HASIL\s+UJI\s+FUNGSI|BERITA\s+ACARA\s+UJI\s+FUNGSI|BERITA\s+ACARA\s+SERAH\s+TERIMA|CUSTOMER\s+ACCEPTANCE|FUNCTIONAL\s+TEST|COMMISSIONING|TEST\s+AND\s+VERIFICATION|INSTALLATION\s+AND\s+VERIFICATION|INSTALLATION\s+RECORD|VERIFICATION\s+RECORD|PTC\s+WINDCHILL|SYSTEM\s+INSTALLATION|INSTALLATION\s+PROCEDURE|INSTALLATION\s+CONCLUSION|CUSTOMER\s+SERVICE\s+ENGINEER", "uji_fungsi"),
     (r"UJI\s+KESESUAIAN|LAPORAN\s+HASIL\s+UJI\s+KESESUAIAN|SERTIFIKAT\s+HASIL\s+UJI\s+KESESUAIAN|LEMBAR\s+HASIL\s+UJI\s+KESESUAIAN", "uji_kesesuaian"),
     (r"PERSETUJUAN\s+IMPOR|PERSETUJUAN\s+IMPORT|SURAT\s+PERSETUJUAN\s+IMPOR", "persetujuan_import"),
