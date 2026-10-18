@@ -54,6 +54,23 @@ def test_compare_two_values_brand():
     assert status == MatchingStatus.TIDAK_SESUAI
 
 
+def test_compare_two_values_facility_name():
+    # RSJ vs Rumah Sakit Jiwa
+    score, status, _ = compare_two_values("Rumah Sakit Jiwa Aceh", "RSJ. Aceh", mode="facility_name")
+    assert status == MatchingStatus.SESUAI
+    assert score == 100.0
+
+    # OCR glued spacing (JIWAACEH vs JIWA ACEH)
+    score, status, _ = compare_two_values("Rumah Sakit Jiwa Aceh", "RUMAH SAKIT JIWAACEH", mode="facility_name")
+    assert status == MatchingStatus.SESUAI
+    assert score == 100.0
+
+    # Suffix equipment name tolerance
+    score, status, _ = compare_two_values("Rumah Sakit Jiwa Aceh", "RS Jiwa Aceh Equipment Name", mode="facility_name")
+    assert status == MatchingStatus.SESUAI
+    assert score == 100.0
+
+
 def test_compare_two_values_name_with_titles():
     # Name with doctor and specialist titles
     score, status, _ = compare_two_values(

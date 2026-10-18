@@ -568,11 +568,25 @@ def build_application_from_form(
     personnel_list: List[PersonnelEntity] = []
     ppr_list: List[PPREntity] = []
 
-    for idx, p in enumerate(parsed_form.get("personnel_data", []), start=1):
-        name = p.get("name", "")
-        role = p.get("role", "")
-        npr = p.get("npr", "")
-        page = p.get("page")
+    raw_personnel = parsed_form.get("personnel_data", [])
+    if isinstance(raw_personnel, str):
+        raw_personnel = [line.strip() for line in raw_personnel.split("\n") if line.strip()]
+    elif not isinstance(raw_personnel, list):
+        raw_personnel = [raw_personnel] if raw_personnel else []
+
+    for idx, p in enumerate(raw_personnel, start=1):
+        if isinstance(p, dict):
+            name = p.get("name", "")
+            role = p.get("role", "")
+            npr = p.get("npr", "")
+            page = p.get("page")
+        elif isinstance(p, str):
+            name = p.strip()
+            role = ""
+            npr = ""
+            page = 1
+        else:
+            continue
 
         person = PersonnelEntity(
             id=f"person_{idx}",
@@ -600,7 +614,7 @@ def build_application_from_form(
         )
         personnel_list.append(person)
 
-        if "PPR" in role.upper():
+        if role and "PPR" in role.upper():
             ppr = PPREntity(
                 id=f"ppr_{len(ppr_list) + 1}",
                 name=ExtractedField[str].from_value(
@@ -701,11 +715,12 @@ def build_application_from_form(
     # Administrative documents
     admin_docs = [
         AdministrativeDocument(
-            requirement=doc.get("requirement", ""),
-            document_number=doc.get("document_number"),
-            document_date=doc.get("document_date"),
+            requirement=doc.get("requirement", "") if isinstance(doc, dict) else str(doc),
+            document_number=doc.get("document_number") if isinstance(doc, dict) else None,
+            document_date=doc.get("document_date") if isinstance(doc, dict) else None,
         )
-        for doc in parsed_form.get("administrative_documents", [])
+        for doc in (parsed_form.get("administrative_documents", []) if isinstance(parsed_form.get("administrative_documents"), list) else [])
+        if doc and isinstance(doc, (dict, str))
     ]
 
     return ApplicationEntity(

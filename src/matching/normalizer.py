@@ -178,8 +178,11 @@ def normalize_facility_name(name: str) -> str:
     text = re.sub(r"\b(?:PASS|FAIL)\b.*$", "", text)
     # Strip military unit / detachment codes e.g. 01.07.04 or 01 07 04
     text = re.sub(r"\b\d{2}[\s.]\d{2}[\s.]\d{2}\b", "", text)
+    # Normalize specific hospital types (RSJ / RS Jiwa, RSIA)
+    text = re.sub(r"\bRUMAH\s+SAKIT\s+JIWA\b|\bRS\s+JIWA\b|\bRSJ\b", "RS JIWA", text)
+    text = re.sub(r"\bRUMAH\s+SAKIT\s+IBU\s+(?:DAN\s+)?ANAK\b|\bRS\s+IBU\s+(?:DAN\s+)?ANAK\b|\bRSIA\b", "RSIA", text)
     text = re.sub(r"\bRUMAH\s+SAKIT\b|\bRUMKIT\b", "RS", text)
-    text = re.sub(r"\bRSU\b|\bRSUD\b|\bRSUP\b|\bRSIA\b", "RS", text)
+    text = re.sub(r"\bRSU\b|\bRSUD\b|\bRSUP\b", "RS", text)
     text = re.sub(r"\bTINGKAT\b", "TK", text)
     # Normalize military hospital descriptor
     text = re.sub(r"\bRS\s+TENTARA\b", "RS", text)

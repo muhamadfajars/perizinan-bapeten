@@ -1402,18 +1402,52 @@ Surat Izin Kerja Radiografer (SIKR) ini berlaku sampai dengan tanggal 1 Mei 2028
     assert "01/05/2028" in f["valid_until"]["value"]
 
 
+def test_extract_paparan_radiasi_fujifilm_layout():
+    from src.extraction.document_parser import extract_paparan_radiasi_data
 
+    p1 = (
+        "PT. FUJIFILM INDONESIA\n"
+        "HASIL PENGUKURAN KEBOCORAN TABUNG RADIASI\n"
+        "No : PKTR/FFID/IN/RM/132/IX/2025\n"
+        "Data Instansi\n"
+        "Nama Instansi : Rumah Sakit Jiwa Aceh\n"
+        "Alamat :\n"
+        "Jalan Dr. T. Syarief Thayeb, Nomor 25 Banda Aceh (23126)\n"
+        "Telp & Fax : (0651)32010\n"
+        "Data Penguji\n"
+        "Nama Instansi : Fujifilm Indonesia\n"
+        "Data Tabung Data Generator\n"
+        "Pabrikan Canon Jenis Pesawat Radiografi Mobile\n"
+        "Model D-125SB Pabrikan Fujifilm\n"
+        "Nomor Seri B124125 Model DR-XD1000\n"
+        "kV max 100 Nomor Seri 56153901\n"
+        "mA max 35 kV max 100\n"
+        "Data Wadah Tabung Data Kolimator\n"
+        "Pabrikan Fujifilm Pabrikan Fujifilm\n"
+        "Model 359Y130002 Model 399Y120003\n"
+        "Nomor Seri B124125 Nomor Seri C123924\n"
+    )
+    p2 = (
+        "Data Alat Ukur\n"
+        "Nama Alat Ukur : Surveymeter Radiasi\n"
+        "Pabrikan : Raysafe\n"
+        "Model : X2\n"
+        "No. Seri : 225570 / 215797\n"
+        "Kebocoran max (mGy/jam) 0.050 Lolos\n"
+        "Nilai lolos uji (mGy/jam) <= 1\n"
+        "Kebocoran Lolos? Lolos\n"
+    )
 
-
-
-
-
-
-
-
-
-
-
+    res = extract_paparan_radiasi_data([p1, p2])
+    assert res["hospital_name"]["value"] == "Rumah Sakit Jiwa Aceh"
+    assert "Jalan Dr. T. Syarief Thayeb" in res["hospital_address"]["value"]
+    assert res["unit_brand"]["value"] == "Fujifilm"
+    assert res["unit_type"]["value"] == "DR-XD1000"
+    assert res["unit_serial_number"]["value"] == "56153901"
+    assert res["tube_brand"]["value"] == "Canon"
+    assert res["tube_type"]["value"] == "D-125SB"
+    assert res["tube_serial_number"]["value"] == "B124125"
+    assert res["radiation_exposure_acceptance"]["value"] == "Lolos"
 
 
 

@@ -42,6 +42,10 @@ def test_normalize_address():
 def test_normalize_facility_name():
     assert normalize_facility_name("Rumkit Tentara Tk IV 01.07.04 Pekanbaru") == "RS TK IV PEKANBARU"
     assert normalize_facility_name("Rumkit Tk. IV Pekanbaru Tube tilt PASS") == "RS TK IV PEKANBARU"
+    assert normalize_facility_name("RSJ. Aceh") == "RS JIWA ACEH"
+    assert normalize_facility_name("Rumah Sakit Jiwa Aceh") == "RS JIWA ACEH"
+    assert normalize_facility_name("RS. Jiwa Aceh") == "RS JIWA ACEH"
+    assert normalize_facility_name("RSIA Bunda") == "RSIA BUNDA"
 
 
 def test_normalize_brand():

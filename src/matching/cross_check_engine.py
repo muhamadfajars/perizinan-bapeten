@@ -98,9 +98,21 @@ def compare_two_values(left: str, right: str, mode: str = "fuzzy_text") -> Tuple
         r_fac = normalize_facility_name(r_str)
         if l_fac == r_fac:
             return 100.0, MatchingStatus.SESUAI, "Nama fasilitas sesuai"
-        score = max(fuzz.token_sort_ratio(l_fac, r_fac), fuzz.token_set_ratio(l_fac, r_fac))
+
+        # Check whitespace-insensitive match (e.g. OCR glued words like "JIWAACEH" vs "JIWA ACEH")
+        l_nospace = l_fac.replace(" ", "")
+        r_nospace = r_fac.replace(" ", "")
+        if l_nospace == r_nospace:
+            return 100.0, MatchingStatus.SESUAI, "Nama fasilitas sesuai"
+
+        score = max(
+            fuzz.token_sort_ratio(l_fac, r_fac),
+            fuzz.token_set_ratio(l_fac, r_fac),
+            fuzz.ratio(l_fac, r_fac),
+            fuzz.ratio(l_nospace, r_nospace),
+        )
         # High tolerance for regional / detachment variations or core facility name match
-        if fuzz.token_set_ratio(l_fac, r_fac) >= 80.0:
+        if max(fuzz.token_set_ratio(l_fac, r_fac), fuzz.ratio(l_fac, r_fac), fuzz.ratio(l_nospace, r_nospace)) >= 80.0:
             return 100.0, MatchingStatus.SESUAI, f"Nama fasilitas sesuai ({score:.1f}%)"
         if score >= MATCH_THRESHOLD:
             return score, MatchingStatus.SESUAI, f"Nama fasilitas sesuai ({score:.1f}%)"
@@ -214,7 +226,7 @@ def evaluate_practice_location_against_facility(
 def evaluate_field_sources(
     field_key: str,
     field_label: str,
-    sources: List[SourceEvidence],
+    sources: List[Any],
     mode: str = "fuzzy_text",
 ) -> FieldCrossCheck:
     """Evaluates cross-check status for a field across all its source documents."""
@@ -222,10 +234,29 @@ def evaluate_field_sources(
     unique_sources: List[SourceEvidence] = []
     seen = set()
     for s in sources:
-        key = (s.document_type, s.document_name, s.page, s.value)
-        if key not in seen and s.value.strip() and s.value.strip() not in ("-", "—"):
+        if isinstance(s, dict):
+            s_obj = SourceEvidence(
+                document_type=s.get("document_type", ""),
+                document_name=s.get("document_name", ""),
+                page=s.get("page"),
+                value=str(s.get("value", "") or ""),
+                confidence=s.get("confidence", 1.0),
+                raw_text=s.get("raw_text"),
+                bbox=s.get("bbox"),
+            )
+        elif isinstance(s, SourceEvidence):
+            s_obj = s
+        elif hasattr(s, "model_dump"):
+            s_obj = SourceEvidence(**s.model_dump())
+        elif hasattr(s, "__dict__"):
+            s_obj = SourceEvidence(**s.__dict__)
+        else:
+            s_obj = s
+
+        key = (s_obj.document_type, s_obj.document_name, s_obj.page, s_obj.value)
+        if key not in seen and s_obj.value.strip() and s_obj.value.strip() not in ("-", "—"):
             seen.add(key)
-            unique_sources.append(s)
+            unique_sources.append(s_obj)
 
     if not unique_sources:
         return FieldCrossCheck(
@@ -238,33 +269,38 @@ def evaluate_field_sources(
         )
 
     if len(unique_sources) == 1:
+        s0_doc = unique_sources[0].document_type
         return FieldCrossCheck(
             field_key=field_key,
             field_label=field_label,
             status=MatchingStatus.TIDAK_DITEMUKAN,
             score=100.0,
-            reason=f"Data hanya ditemukan pada 1 dokumen ({unique_sources[0].document_type}), belum ada dokumen pembanding",
+            reason=f"Data hanya ditemukan pada 1 dokumen ({s0_doc}), belum ada dokumen pembanding",
             sources=unique_sources,
         )
 
     # Reference is the first source (e.g. Formulir or anchor document)
     ref = unique_sources[0]
+    ref_val = ref.value
+    ref_doc = ref.document_type
     comparisons = []
     worst_status = MatchingStatus.SESUAI
     discrepancies = []
     total_score = 0.0
 
     for other in unique_sources[1:]:
-        score, status, exp = compare_two_values(ref.value, other.value, mode=mode)
+        other_val = other.value
+        other_doc = other.document_type
+        score, status, exp = compare_two_values(ref_val, other_val, mode=mode)
         comparisons.append((score, status, exp))
         if score is not None:
             total_score += score
         if status == MatchingStatus.TIDAK_SESUAI:
             worst_status = MatchingStatus.TIDAK_SESUAI
-            discrepancies.append(f"{ref.document_type} ('{ref.value}') vs {other.document_type} ('{other.value}'): {exp}")
+            discrepancies.append(f"{ref_doc} ('{ref_val}') vs {other_doc} ('{other_val}'): {exp}")
         elif status == MatchingStatus.PERLU_REVIEW and worst_status != MatchingStatus.TIDAK_SESUAI:
             worst_status = MatchingStatus.PERLU_REVIEW
-            discrepancies.append(f"{other.document_type}: {exp}")
+            discrepancies.append(f"{other_doc}: {exp}")
 
     avg_score = round(total_score / len(unique_sources[1:]), 1)
 

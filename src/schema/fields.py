@@ -52,7 +52,7 @@ DOCUMENT_TYPES = {
         "kind": "image",
     },
     "paparan_radiasi": {
-        "name": "Hasil Pengukuran Paparan Radiasi",
+        "name": "Hasil Pengukuran Paparan Radiasi / Kebocoran Tabung",
         "kind": "pdf",
     },
     "uji_fungsi": {

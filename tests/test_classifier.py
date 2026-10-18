@@ -32,7 +32,9 @@ def test_classify_by_filename():
     assert classify_by_filename("kartu_sib_bapeten.pdf") == "sib"
     assert classify_by_filename("denah_ruangan_radiasi.pdf") == "paparan_radiasi"
     assert classify_by_filename("tube_housing_plate.jpg") == "label_tabung"
-    assert classify_by_filename("laporan_dosis_awal_lencana_osl.pdf") == "laporan_dosis_awal"
+    assert classify_by_filename("20260921173738-250169011_KTUN_Sertifikat_UK jiwa aceh.pdf") == "uji_kesesuaian"
+    assert classify_by_filename("LEHU_RSJ_Aceh.pdf") == "uji_kesesuaian"
+    assert classify_by_filename("Sertifikat_UK_Fujifilm.pdf") == "uji_kesesuaian"
     assert classify_by_filename("rencana_teknis_fasilitas_bangunan_penahan_radiasi.pdf") == "gedung_penahan_radiasi"
 
 

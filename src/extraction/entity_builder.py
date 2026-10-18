@@ -159,12 +159,26 @@ def consolidate_application(extractions: Dict[str, List[Dict[str, Any]]]) -> App
             if any(xr_fallback.values()):
                 all_xr = [xr_fallback]
 
+        raw_pdata = parsed_fields.get("personnel_data", [])
+        if isinstance(raw_pdata, dict) and "value" in raw_pdata:
+            raw_pdata = raw_pdata["value"]
+        if isinstance(raw_pdata, str):
+            raw_pdata = [line.strip() for line in raw_pdata.split("\n") if line.strip()]
+        elif not isinstance(raw_pdata, list):
+            raw_pdata = [raw_pdata] if raw_pdata else []
+
+        raw_admin = parsed_fields.get("administrative_documents", [])
+        if isinstance(raw_admin, dict) and "value" in raw_admin:
+            raw_admin = raw_admin["value"]
+        if not isinstance(raw_admin, list):
+            raw_admin = [raw_admin] if raw_admin else []
+
         form_dict = {
             "header": parsed_fields.get("header", {}),
             "hospital_name": parsed_fields.get("hospital_name", {}),
             "hospital_address": parsed_fields.get("hospital_address", {}),
-            "personnel_data": parsed_fields.get("personnel_data", {}).get("value", []) if isinstance(parsed_fields.get("personnel_data"), dict) else parsed_fields.get("personnel_data", []),
-            "administrative_documents": parsed_fields.get("administrative_documents", {}).get("value", []) if isinstance(parsed_fields.get("administrative_documents"), dict) else parsed_fields.get("administrative_documents", []),
+            "personnel_data": raw_pdata,
+            "administrative_documents": raw_admin,
             "all_xray_rows": all_xr,
         }
         app = build_application_from_form(form_dict, file_name=file_name)

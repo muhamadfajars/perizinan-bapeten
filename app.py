@@ -85,6 +85,21 @@ section[data-testid="stSidebar"] strong, section[data-testid="stSidebar"] b {
     color: var(--text-primary) !important;
 }
 
+/* Sidebar Expander & Filename Display */
+section[data-testid="stSidebar"] [data-testid="stExpander"] summary {
+    font-size: 0.82rem !important;
+    line-height: 1.35 !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+}
+section[data-testid="stSidebar"] [data-testid="stExpander"] summary p {
+    font-size: 0.82rem !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+}
+
 h1, h2, h3, h4, h5, h6, p, span, label, div {
     color: var(--text-primary);
 }
@@ -719,8 +734,8 @@ FACILITY_NAME_EXPECTED_DOCS = [
     },
     {
         "doc_type": "paparan_radiasi",
-        "label": "Pengukuran Paparan",
-        "desc": "Laporan Pengukuran Tingkat Paparan Ruangan",
+        "label": "Pengukuran Paparan / Kebocoran",
+        "desc": "Laporan Pengukuran Paparan Ruangan / Uji Kebocoran Tabung",
         "required": False,
     },
     {
@@ -788,8 +803,8 @@ FACILITY_ADDRESS_EXPECTED_DOCS = [
     },
     {
         "doc_type": "paparan_radiasi",
-        "label": "Pengukuran Paparan",
-        "desc": "Alamat Fasilitas pada Laporan Paparan Radiasi",
+        "label": "Pengukuran Paparan / Kebocoran",
+        "desc": "Alamat Fasilitas pada Laporan Paparan / Kebocoran",
         "required": False,
     },
     {
@@ -957,8 +972,8 @@ XRAY_UNIT_BRAND_EXPECTED_DOCS = [
     },
     {
         "doc_type": "paparan_radiasi",
-        "label": "Pengukuran Paparan",
-        "desc": "Laporan Proteksi & Paparan Ruangan",
+        "label": "Pengukuran Paparan / Kebocoran",
+        "desc": "Laporan Paparan Ruangan / Uji Kebocoran Tabung",
         "required": False,
     },
 ]
@@ -1008,8 +1023,8 @@ XRAY_UNIT_TYPE_EXPECTED_DOCS = [
     },
     {
         "doc_type": "paparan_radiasi",
-        "label": "Pengukuran Paparan",
-        "desc": "Tipe / Model pada Lembar Paparan Radiasi",
+        "label": "Pengukuran Paparan / Kebocoran",
+        "desc": "Tipe / Model pada Lembar Paparan / Kebocoran",
         "required": False,
     },
 ]
@@ -1053,8 +1068,8 @@ XRAY_UNIT_SERIAL_EXPECTED_DOCS = [
     },
     {
         "doc_type": "paparan_radiasi",
-        "label": "Pengukuran Paparan",
-        "desc": "Nomor Seri pada Lembar Paparan Radiasi",
+        "label": "Pengukuran Paparan / Kebocoran",
+        "desc": "Nomor Seri pada Lembar Paparan / Kebocoran",
         "required": False,
     },
 ]
@@ -1098,8 +1113,8 @@ XRAY_TUBE_BRAND_EXPECTED_DOCS = [
     },
     {
         "doc_type": "paparan_radiasi",
-        "label": "Pengukuran Paparan",
-        "desc": "Merk Tabung pada Lembar Paparan Radiasi",
+        "label": "Pengukuran Paparan / Kebocoran",
+        "desc": "Merk Tabung pada Lembar Paparan / Kebocoran",
         "required": False,
     },
 ]
@@ -1143,8 +1158,8 @@ XRAY_TUBE_TYPE_EXPECTED_DOCS = [
     },
     {
         "doc_type": "paparan_radiasi",
-        "label": "Pengukuran Paparan",
-        "desc": "Tipe / Model Tabung pada Paparan Radiasi",
+        "label": "Pengukuran Paparan / Kebocoran",
+        "desc": "Tipe / Model Tabung pada Paparan / Kebocoran",
         "required": False,
     },
 ]
@@ -1188,8 +1203,8 @@ XRAY_TUBE_SERIAL_EXPECTED_DOCS = [
     },
     {
         "doc_type": "paparan_radiasi",
-        "label": "Pengukuran Paparan",
-        "desc": "Nomor Seri Tabung pada Paparan Radiasi",
+        "label": "Pengukuran Paparan / Kebocoran",
+        "desc": "Nomor Seri Tabung pada Paparan / Kebocoran",
         "required": False,
     },
 ]
@@ -1235,39 +1250,38 @@ def _render_parameter_card(category_label, field_title, fv, docs_map, expected_d
     reason_msg = fv.get("reason", "") if fv else ""
 
     # For hospital name, address, personnel name, equipment brand, or serial number, dynamically compute tolerance-based cross check
-    if "Nama Rumah Sakit" in field_title or (fv and fv.get("field_key") == "project_name"):
-        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=_safe_page_int(s.get("page"))) for s in clean_sources if s["value"] not in ("—", "")]
-        if len(ev) > 1:
-            check_res = evaluate_field_sources("project_name", "Nama instansi", ev, mode="facility_name")
-            fstatus = _clean_status_str(check_res.status)
-            reason_msg = check_res.reason
-    elif "Alamat" in field_title or (fv and fv.get("field_key") == "project_address"):
-        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=_safe_page_int(s.get("page"))) for s in clean_sources if s["value"] not in ("—", "")]
-        if len(ev) > 1:
-            check_res = evaluate_field_sources("project_address", "Alamat instansi", ev, mode="fuzzy_address")
-            fstatus = _clean_status_str(check_res.status)
-            reason_msg = check_res.reason
-    elif (fv and fv.get("field_key") in {"person_name", "ppr_name"}) or "Nama Personel" in field_title or "Nama Petugas" in field_title or "Nama PPR" in field_title:
-        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=_safe_page_int(s.get("page"))) for s in clean_sources if s["value"] not in ("—", "")]
-        if len(ev) > 1:
-            fkey = (fv.get("field_key") if fv else None) or "person_name"
-            check_res = evaluate_field_sources(fkey, field_title, ev, mode="fuzzy_name")
-            fstatus = _clean_status_str(check_res.status)
-            reason_msg = check_res.reason
-    elif (fv and fv.get("field_key") in {"unit_serial_number", "tube_serial_number"}) or "Nomor Seri" in field_title:
-        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=_safe_page_int(s.get("page"))) for s in clean_sources if s["value"] not in ("—", "")]
-        if len(ev) > 1:
-            fkey = (fv.get("field_key") if fv else None) or "serial_number"
-            check_res = evaluate_field_sources(fkey, field_title, ev, mode="serial")
-            fstatus = _clean_status_str(check_res.status)
-            reason_msg = check_res.reason
-    elif (fv and fv.get("field_key") in {"unit_brand", "tube_brand"}) or "Merk" in field_title:
-        ev = [SourceEvidence(document_type=s["document_type"], document_name=s["document_name"], value=s["value"], page=_safe_page_int(s.get("page"))) for s in clean_sources if s["value"] not in ("—", "")]
-        if len(ev) > 1:
-            fkey = (fv.get("field_key") if fv else None) or "brand"
-            check_res = evaluate_field_sources(fkey, field_title, ev, mode="brand")
-            fstatus = _clean_status_str(check_res.status)
-            reason_msg = check_res.reason
+    ev = [
+        {
+            "document_type": s["document_type"],
+            "document_name": s["document_name"],
+            "value": s["value"],
+            "page": _safe_page_int(s.get("page")),
+        }
+        for s in clean_sources if s["value"] not in ("—", "")
+    ]
+    if ("Nama Rumah Sakit" in field_title or (fv and fv.get("field_key") == "project_name")) and len(ev) > 1:
+        check_res = evaluate_field_sources("project_name", "Nama instansi", ev, mode="facility_name")
+        fstatus = _clean_status_str(check_res.status)
+        reason_msg = check_res.reason
+    elif ("Alamat" in field_title or (fv and fv.get("field_key") == "project_address")) and len(ev) > 1:
+        check_res = evaluate_field_sources("project_address", "Alamat instansi", ev, mode="fuzzy_address")
+        fstatus = _clean_status_str(check_res.status)
+        reason_msg = check_res.reason
+    elif ((fv and fv.get("field_key") in {"person_name", "ppr_name"}) or "Nama Personel" in field_title or "Nama Petugas" in field_title or "Nama PPR" in field_title) and len(ev) > 1:
+        fkey = (fv.get("field_key") if fv else None) or "person_name"
+        check_res = evaluate_field_sources(fkey, field_title, ev, mode="fuzzy_name")
+        fstatus = _clean_status_str(check_res.status)
+        reason_msg = check_res.reason
+    elif ((fv and fv.get("field_key") in {"unit_serial_number", "tube_serial_number"}) or "Nomor Seri" in field_title) and len(ev) > 1:
+        fkey = (fv.get("field_key") if fv else None) or "serial_number"
+        check_res = evaluate_field_sources(fkey, field_title, ev, mode="serial")
+        fstatus = _clean_status_str(check_res.status)
+        reason_msg = check_res.reason
+    elif ((fv and fv.get("field_key") in {"unit_brand", "tube_brand"}) or "Merk" in field_title) and len(ev) > 1:
+        fkey = (fv.get("field_key") if fv else None) or "brand"
+        check_res = evaluate_field_sources(fkey, field_title, ev, mode="brand")
+        fstatus = _clean_status_str(check_res.status)
+        reason_msg = check_res.reason
     else:
         if reason_msg:
             reason_msg = re.sub(r"\s*(?:Tube(?:\s+tilt)?|Collimator(?:\s+Rotation)?)\s*PASS\b", "", reason_msg, flags=re.I)
@@ -1762,12 +1776,12 @@ def _sanitize_run_facility_identity(run_obj):
             f_data = fac_fields.get(fkey)
             if f_data and "sources" in f_data:
                 ev_list = [
-                    SourceEvidence(
-                        document_type=s.get("document_type", ""),
-                        document_name=s.get("document_name", ""),
-                        value=s.get("value", ""),
-                        page=_safe_page_int(s.get("page")),
-                    )
+                    {
+                        "document_type": s.get("document_type", ""),
+                        "document_name": s.get("document_name", ""),
+                        "value": s.get("value", ""),
+                        "page": _safe_page_int(s.get("page")),
+                    }
                     for s in f_data.get("sources", [])
                     if s.get("value") and s.get("value") not in ("—", "-")
                 ]
@@ -1944,6 +1958,7 @@ run_labels = {r_id: _get_run_summary_label(r_id) for r_id in run_options}
 if past_runs and "latest_result" not in st.session_state:
     try:
         st.session_state["latest_result"] = _sanitize_run_facility_identity(db.get_run(past_runs[0][0]))
+        st.session_state["sb_run_selector"] = past_runs[0][0]
     except Exception:
         pass
 
@@ -2005,20 +2020,29 @@ with st.sidebar:
     if past_runs:
         st.markdown("##### 📜 Riwayat Uji Dokumen")
         curr_id = st.session_state.get("latest_result", {}).get("run_id")
+
+        # Ensure selectbox state stays synchronized with active run
+        if curr_id and curr_id in run_options:
+            if st.session_state.get("sb_run_selector") != curr_id:
+                st.session_state["sb_run_selector"] = curr_id
+
+        def _on_run_selector_change():
+            sel_id = st.session_state.get("sb_run_selector")
+            if sel_id:
+                loaded_run = db.get_run(sel_id)
+                if loaded_run:
+                    st.session_state["latest_result"] = _sanitize_run_facility_identity(loaded_run)
+
         def_idx = run_options.index(curr_id) if curr_id in run_options else 0
-        selected_run_id = st.selectbox(
+        st.selectbox(
             "Pilih Batch",
             options=run_options,
             index=def_idx,
             format_func=lambda rid: run_labels.get(rid, rid),
             key="sb_run_selector",
+            on_change=_on_run_selector_change,
             label_visibility="collapsed",
         )
-        if curr_id != selected_run_id:
-            loaded_run = db.get_run(selected_run_id)
-            if loaded_run:
-                st.session_state["latest_result"] = _sanitize_run_facility_identity(loaded_run)
-                st.rerun()
 
         render_html("<hr style='margin:10px 0; border-color:rgba(255,255,255,0.08);'>")
 
@@ -2049,7 +2073,8 @@ with st.sidebar:
                     default_cats = ["label_unit", "label_tabung"]
                 else:
                     default_cats = [detected_type] if detected_type in doc_keys else []
-                with st.expander(f"{icon} {file.name[:25]}", expanded=not is_conf):
+                with st.expander(f"{icon} {file.name}", expanded=not is_conf):
+                    st.caption(f"🔍 Terdeteksi: **{doc_names.get(detected_type, detected_type)}** ({reason})")
                     chosen = st.multiselect(
                         "Kategori Dokumen",
                         options=doc_keys,

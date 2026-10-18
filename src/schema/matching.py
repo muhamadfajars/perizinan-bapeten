@@ -10,9 +10,9 @@ evaluators, and API endpoints, fulfilling:
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from datetime import datetime, timezone
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 
 class MatchingStatus(str, Enum):
@@ -26,6 +26,8 @@ class MatchingStatus(str, Enum):
 
 class SourceEvidence(BaseModel):
     """Informasi dokumen sumber untuk suatu nilai field."""
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore")
+
     document_type: str = Field(..., description="Tipe dokumen (e.g. formulir, ppkr, label_unit, sip, sib)")
     document_name: str = Field(..., description="Nama file dokumen")
     page: Optional[int] = Field(default=None, description="Halaman ditemukannya nilai (1-indexed)")
@@ -37,6 +39,8 @@ class SourceEvidence(BaseModel):
 
 class FieldCrossCheck(BaseModel):
     """Hasil cross-check untuk satu field tertentu antar beberapa dokumen."""
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore")
+
     field_key: str = Field(..., description="Identifikasi field, misal unit_serial_number")
     field_label: str = Field(..., description="Label manusia, misal Nomor Seri Unit")
     status: MatchingStatus = Field(..., description="Status kesesuaian")
@@ -45,9 +49,28 @@ class FieldCrossCheck(BaseModel):
     sources: List[SourceEvidence] = Field(default_factory=list, description="Daftar nilai dari dokumen-dokumen pembanding")
     discrepancies: List[str] = Field(default_factory=list, description="Detail perbedaan jika ada ketidaksesuaian")
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_sources(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "sources" in data and isinstance(data["sources"], list):
+            norm = []
+            for s in data["sources"]:
+                if hasattr(s, "model_dump"):
+                    norm.append(s.model_dump())
+                elif hasattr(s, "dict"):
+                    norm.append(s.dict())
+                elif hasattr(s, "__dict__"):
+                    norm.append(s.__dict__)
+                else:
+                    norm.append(s)
+            data["sources"] = norm
+        return data
+
 
 class EntityCrossCheck(BaseModel):
     """Hasil cross-check untuk satu entitas (Fasilitas, 1 Personel, 1 PPR, atau 1 Pesawat Sinar-X)."""
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore")
+
     category: str = Field(..., description="Kategori entitas: facility | personnel | ppr | xray_equipment | tube")
     entity_id: str = Field(..., description="ID entitas, misal unit_1, person_1")
     entity_label: str = Field(..., description="Label ringkas entitas, misal 'Unit #1: SHIMADZU SB2002000027WK'")

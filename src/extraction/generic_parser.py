@@ -200,10 +200,16 @@ def extract_facility_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
     return "", None
 
 
+VENDOR_HEADER_ADDR_RE = re.compile(
+    r"\b(?:Casablanca|Kasablanka|Office\s*88|Kav\.?\s*88|Tower\s+[A-Z]|(?:3[0-9]|2[0-9]|[1-9])th\s+Floor|Mega\s+Kuningan|Rasuna\s+Said|Sudirman\s+Central|SCBD|Gedung\s+Graha|World\s+Trade\s+Center|WTC|Menara\s+Kadin|PT\.?\s*(?:FUJIFILM|SIEMENS|PHILIPS|GE|SHIMADZU))\b",
+    re.I,
+)
+
+
 def extract_facility_address(pages_text: List[str]) -> Tuple[str, Optional[int]]:
     """Extracts hospital / facility address from text pages with multi-line administrative continuation."""
     label_patterns = [
-        r"(?:Alamat(?:\s+Rumah\s+Sakit|\s+RS|\s+Instansi|\s+Fasilitas)?)\s*[:=\-–]\s*([^\n\r]+)",
+        r"(?:Customer\s+Address|Hospital\s+Address|Alamat(?:\s+Rumah\s+Sakit|\s+RS|\s+Instansi|\s+Fasilitas|\s+Pelanggan)?|Address)\s*[:=\-–]?\s*([^\n\r]+)",
     ]
     for p_idx, page in enumerate(pages_text or [], start=1):
         for pat in label_patterns:
@@ -211,11 +217,11 @@ def extract_facility_address(pages_text: List[str]) -> Tuple[str, Optional[int]]
                 val = clean_value(m.group(1))
                 val = re.split(r"[\r\n]|\||Telp|Email|Fax|Tanggal", val, flags=re.IGNORECASE)[0].strip(" :;-,")
                 val = re.split(
-                    r"\b(?:Tube(?:\s+tilt)?|Collimator(?:\s+Rotation)?|Mechanical|InSpec|Status|Brake|Batere|PASS|FAIL)\b",
+                    r"\b(?:Serial\s*No\.?|Serial\s+Number|Contact\s+Person|Installation\s+date|Warraty|Warranty|Tube(?:\s+tilt)?|Collimator(?:\s+Rotation)?|Mechanical|InSpec|Status|Brake|Batere|PASS|FAIL)\b",
                     val,
                     flags=re.I,
                 )[0].strip(" :;-,")
-                if len(val) >= 6:
+                if len(val) >= 6 and not VENDOR_HEADER_ADDR_RE.search(val):
                     return val, p_idx
 
     # Look for Jl. or Jalan in first 3 pages
@@ -231,11 +237,11 @@ def extract_facility_address(pages_text: List[str]) -> Tuple[str, Optional[int]]
                     flags=re.I,
                 )[0].strip(" :;-,")
                 cand = re.split(
-                    r"\b(?:Tube(?:\s+tilt)?|Collimator(?:\s+Rotation)?|Mechanical|InSpec|Status|Brake|Batere|PASS|FAIL)\b",
+                    r"\b(?:Serial\s*No\.?|Serial\s+Number|Contact\s+Person|Tube(?:\s+tilt)?|Collimator(?:\s+Rotation)?|Mechanical|InSpec|Status|Brake|Batere|PASS|FAIL)\b",
                     cand,
                     flags=re.I,
                 )[0].strip(" :;-,")
-                if len(cand) >= 8 and not re.search(r"^(?:Jl\.?|Jalan)\s*$", cand, re.I):
+                if len(cand) >= 8 and not re.search(r"^(?:Jl\.?|Jalan)\s*$", cand, re.I) and not VENDOR_HEADER_ADDR_RE.search(cand):
                     parts = [cand]
                     for next_l in lines[idx + 1: idx + 4]:
                         if re.search(r"^(?:Telp|Website|Email|Fax|LEMBAR|BAB|DAFTAR)\b", next_l, re.I):
@@ -244,11 +250,12 @@ def extract_facility_address(pages_text: List[str]) -> Tuple[str, Optional[int]]
                             continue
                         if re.search(r"\b(?:Kecamatan|Kec\.|Kelurahan|Kel\.|Kabupaten|Kab\.|Kota|Provinsi|RT|RW|\d{5})\b", next_l, re.I):
                             clean_next = clean_value(re.split(r"\||Telp|Email|Fax|website|Halaman", next_l, flags=re.I)[0]).strip(" :;-,")
-                            if clean_next:
+                            if clean_next and not VENDOR_HEADER_ADDR_RE.search(clean_next):
                                 parts.append(clean_next)
                     full_addr = ", ".join(parts)
                     full_addr = re.sub(r",\s*,", ",", full_addr)
-                    return full_addr, p_idx + 1
+                    if not VENDOR_HEADER_ADDR_RE.search(full_addr):
+                        return full_addr, p_idx + 1
 
     return "", None
 

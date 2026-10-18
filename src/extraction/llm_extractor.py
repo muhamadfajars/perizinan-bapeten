@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 
 # Field definitions and guidance for Qwen 2.5
 FIELD_DESCRIPTIONS: Dict[str, str] = {
-    "hospital_name": "Nama lengkap rumah sakit, klinik, atau fasilitas pemohon/pelanggan (contoh: RSUD Dr. Soetomo, PT Medika Jaya Sentosa)",
-    "hospital_address": "Alamat lengkap rumah sakit atau fasilitas pemohon/pelanggan (contoh: Jl. Panglima Sudirman No. 120, Madiun)",
-    "unit_brand": "Merk atau pabrikan pesawat sinar-X / unit radiologi (contoh: Shimadzu, GE Healthcare, Philips, Siemens, United Imaging)",
+    "hospital_name": "Nama lengkap rumah sakit, klinik, atau fasilitas pemohon/pelanggan (contoh: RSUD Dr. Soetomo, RS Jiwa Aceh)",
+    "hospital_address": "Alamat lengkap rumah sakit atau fasilitas pemohon/pelanggan (contoh: Jl. Panglima Sudirman No. 120, Madiun. PENTING: JANGAN ambil alamat gedung kantor vendor/distributor/pabrikan seperti Casablanca/Tower)",
+    "unit_brand": "Merk atau pabrikan pesawat sinar-X / unit radiologi (contoh: Shimadzu, GE Healthcare, Philips, Siemens, United Imaging, Fujifilm)",
     "unit_type": "Tipe atau model pesawat sinar-X / unit (contoh: Optima XR220amx, RADspeed Fit, MobileArt Evolution, uDR 592)",
     "unit_serial_number": "Nomor seri (Serial Number / S/N / No Seri) khusus UNIT pesawat rontgen / generator",
     "tube_brand": "Merk atau pabrikan tabung sinar-X (X-Ray Tube) (contoh: Shimadzu, Varex, Canon, Toshiba, Maxiray)",
@@ -237,14 +237,28 @@ def extract_with_llm(
         return {}
 
 
-def is_field_empty(field_entry: Any) -> bool:
-    """Check if a field value in parsed dictionary is empty or not found."""
+VENDOR_HEADER_ADDR_RE = re.compile(
+    r"\b(?:Casablanca|Kasablanka|Office\s*88|Kav\.?\s*88|Tower\s+[A-Z]|(?:3[0-9]|2[0-9]|[1-9])th\s+Floor|Mega\s+Kuningan|Rasuna\s+Said|Sudirman\s+Central|SCBD|Gedung\s+Graha|World\s+Trade\s+Center|WTC|Menara\s+Kadin|PT\.?\s*(?:FUJIFILM|SIEMENS|PHILIPS|GE|SHIMADZU))\b",
+    re.I,
+)
+
+
+def is_field_empty(field_entry: Any, field_name: Optional[str] = None) -> bool:
+    """Check if a field value in parsed dictionary is empty, placeholder, or invalid vendor header."""
     if not field_entry:
         return True
     if isinstance(field_entry, dict):
         val = field_entry.get("value")
-        return val in ("", "-", "—", None, [], {})
-    return field_entry in ("", "-", "—", None, [], {})
+    else:
+        val = field_entry
+    if val in ("", "-", "—", "null", "None", None, [], {}):
+        return True
+    val_str = str(val).strip()
+    if val_str in ("", "-", "—", "null", "None"):
+        return True
+    if field_name == "hospital_address" and VENDOR_HEADER_ADDR_RE.search(val_str):
+        return True
+    return False
 
 
 def merge_with_llm_fallback(
@@ -267,7 +281,11 @@ def merge_with_llm_fallback(
         return parsed_fields
 
     # Identify missing fields
-    missing_fields = [f for f in expected if f not in ("personnel_data", "administrative_documents", "table_of_contents") and is_field_empty(parsed_fields.get(f))]
+    missing_fields = [
+        f for f in expected
+        if f not in ("personnel_data", "administrative_documents", "table_of_contents")
+        and is_field_empty(parsed_fields.get(f), field_name=f)
+    ]
 
     # Criteria to invoke LLM:
     # 1. force_llm is True, OR
@@ -310,7 +328,7 @@ def merge_with_llm_fallback(
 
     merged = dict(parsed_fields)
     for field_name, llm_item in llm_extracted.items():
-        if field_name in expected and is_field_empty(merged.get(field_name)):
+        if field_name in expected and is_field_empty(merged.get(field_name), field_name=field_name):
             merged[field_name] = llm_item
 
     return merged

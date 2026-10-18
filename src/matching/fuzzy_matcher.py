@@ -64,10 +64,22 @@ def compare_values(left, right, mode="fuzzy_text"):
     if mode == "facility_name":
         l_fac = normalize_facility_name(left)
         r_fac = normalize_facility_name(right)
-        if l_fac == r_fac:
+        if l_fac == r_fac or l_fac.replace(" ", "") == r_fac.replace(" ", ""):
             return 100.0, STATUS_OK
-        score = max(fuzz.token_sort_ratio(l_fac, r_fac), fuzz.token_set_ratio(l_fac, r_fac))
-        if fuzz.token_set_ratio(l_fac, r_fac) >= 80.0 or score >= MATCH_THRESHOLD:
+        l_nospace = l_fac.replace(" ", "")
+        r_nospace = r_fac.replace(" ", "")
+        score = max(
+            fuzz.token_sort_ratio(l_fac, r_fac),
+            fuzz.token_set_ratio(l_fac, r_fac),
+            fuzz.ratio(l_fac, r_fac),
+            fuzz.ratio(l_nospace, r_nospace),
+        )
+        if (
+            fuzz.token_set_ratio(l_fac, r_fac) >= 80.0
+            or fuzz.ratio(l_fac, r_fac) >= 80.0
+            or fuzz.ratio(l_nospace, r_nospace) >= 80.0
+            or score >= MATCH_THRESHOLD
+        ):
             return score, STATUS_OK
         if score >= REVIEW_THRESHOLD:
             return score, STATUS_REVIEW
