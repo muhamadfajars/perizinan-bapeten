@@ -41,5 +41,18 @@ BRAND_FULL_NAMES = {
 MASTER_DOCUMENT_FIELDS = DOCUMENT_FIELDS
 MASTER_CROSS_CHECK_RULES = CROSS_CHECK_RULES
 
+# LLM Extraction configuration (Ollama local inference)
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_MODEL = "qwen2.5:7b"
+USE_LLM_EXTRACTION = True
+LLM_TIMEOUT_SECONDS = 45.0
+HIGH_VARIANCE_DOCS = {
+    "uji_fungsi",
+    "persetujuan_import",
+    "spesifikasi_pesawat",
+    "paparan_radiasi",
+}
+
 for path in [INPUT_ARCHIVE_DIR, LABEL_DIR, PREPROCESSED_DIR, OCR_DIR, RESULT_DIR, CROPS_DIR]:
     path.mkdir(parents=True, exist_ok=True)
+

@@ -74,12 +74,14 @@ section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #0b1120 0%, #070a12 100%) !important;
     border-right: 1px solid var(--border-subtle) !important;
 }
-section[data-testid="stSidebar"] * {
-    color: var(--text-secondary) !important;
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] .stMarkdown p {
+    color: var(--text-secondary);
 }
 section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, 
 section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] h4,
-section[data-testid="stSidebar"] strong {
+section[data-testid="stSidebar"] strong, section[data-testid="stSidebar"] b {
     color: var(--text-primary) !important;
 }
 
@@ -522,6 +524,121 @@ h1, h2, h3, h4, h5, h6, p, span, label, div {
 }
 [data-testid="stExpander"] summary:hover {
     color: #38bdf8 !important;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   HIGH-CONTRAST PRIMARY BUTTONS (Bright Blue Background)
+   Ensures text on bright blue is bold dark navy (#04101e) for crystal clarity
+   ────────────────────────────────────────────────────────────────── */
+button[kind="primary"],
+.stButton > button[kind="primary"],
+[data-testid="stBaseButton-primary"],
+div[data-testid="stSidebar"] button[kind="primary"],
+div[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] {
+    background-color: #38bdf8 !important;
+    background-image: none !important;
+    border: none !important;
+    border-radius: 9px !important;
+    padding: 0.6rem 1.2rem !important;
+    box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35) !important;
+    transition: all 0.2s ease !important;
+}
+
+button[kind="primary"] *,
+button[kind="primary"] p,
+button[kind="primary"] span,
+button[kind="primary"] div,
+.stButton > button[kind="primary"] *,
+.stButton > button[kind="primary"] p,
+.stButton > button[kind="primary"] span,
+[data-testid="stBaseButton-primary"] *,
+[data-testid="stBaseButton-primary"] p,
+[data-testid="stBaseButton-primary"] span,
+div[data-testid="stSidebar"] button[kind="primary"] *,
+div[data-testid="stSidebar"] button[kind="primary"] p,
+div[data-testid="stSidebar"] button[kind="primary"] span,
+div[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] *,
+div[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] p,
+div[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] span {
+    color: #04101e !important;
+    font-weight: 800 !important;
+    font-size: 0.95rem !important;
+    letter-spacing: -0.01em !important;
+}
+
+button[kind="primary"]:hover,
+[data-testid="stBaseButton-primary"]:hover,
+div[data-testid="stSidebar"] button[kind="primary"]:hover {
+    background-color: #0ea5e9 !important;
+    box-shadow: 0 6px 20px rgba(56, 189, 248, 0.5) !important;
+    transform: translateY(-1px) !important;
+}
+
+button[kind="primary"]:hover *,
+[data-testid="stBaseButton-primary"]:hover *,
+div[data-testid="stSidebar"] button[kind="primary"]:hover * {
+    color: #04101e !important;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   HIGH-CONTRAST BASEWEB TAGS / PILLS (Multiselect selections)
+   ────────────────────────────────────────────────────────────────── */
+[data-baseweb="tag"],
+div[data-testid="stSidebar"] [data-baseweb="tag"] {
+    background-color: #38bdf8 !important;
+    border-radius: 6px !important;
+    border: none !important;
+    padding: 3px 8px !important;
+}
+
+[data-baseweb="tag"] *,
+[data-baseweb="tag"] span,
+[data-baseweb="tag"] div,
+[data-baseweb="tag"] p,
+div[data-testid="stSidebar"] [data-baseweb="tag"] *,
+div[data-testid="stSidebar"] [data-baseweb="tag"] span,
+div[data-testid="stSidebar"] [data-baseweb="tag"] div {
+    color: #04101e !important;
+    font-weight: 700 !important;
+    font-size: 0.82rem !important;
+}
+
+[data-baseweb="tag"] svg,
+div[data-testid="stSidebar"] [data-baseweb="tag"] svg {
+    fill: #04101e !important;
+    color: #04101e !important;
+    width: 14px !important;
+    height: 14px !important;
+}
+
+[data-baseweb="tag"] svg:hover,
+div[data-testid="stSidebar"] [data-baseweb="tag"] svg:hover {
+    fill: #b91c1c !important;
+    color: #b91c1c !important;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   SECONDARY & DOWNLOAD BUTTONS
+   ────────────────────────────────────────────────────────────────── */
+button[kind="secondary"],
+[data-testid="stBaseButton-secondary"],
+.stDownloadButton > button {
+    background: #1e293b !important;
+    color: #f8fafc !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+}
+button[kind="secondary"] *,
+[data-testid="stBaseButton-secondary"] *,
+.stDownloadButton > button * {
+    color: #f8fafc !important;
+}
+button[kind="secondary"]:hover,
+[data-testid="stBaseButton-secondary"]:hover,
+.stDownloadButton > button:hover {
+    background: #334155 !important;
+    border-color: rgba(255, 255, 255, 0.2) !important;
 }
 
 /* Scrollbar */
@@ -1859,6 +1976,29 @@ with st.sidebar:
     </div>
     """)
     st.caption("Sistem Verifikasi & Cross-Check Izin Pemanfaatan Radiasi Pengion.")
+
+    # Local LLM Status Badge
+    try:
+        from src.extraction.llm_extractor import is_ollama_available
+        ollama_active = is_ollama_available()
+    except Exception:
+        ollama_active = False
+
+    if ollama_active:
+        render_html("""
+        <div style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); border-radius:8px; padding:6px 10px; margin-top:8px; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;">
+            <div><span style="font-weight:600; font-size:0.8rem; color:#f8fafc;">🤖 LLM Lokal</span><br><span style="font-size:0.7rem; color:#94a3b8;">Qwen 2.5 7B (On-Premise)</span></div>
+            <span style="background:#059669; color:#fff; font-size:0.65rem; font-weight:700; padding:2px 6px; border-radius:4px;">🟢 AKTIF</span>
+        </div>
+        """)
+    else:
+        render_html("""
+        <div style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:6px 10px; margin-top:8px; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;">
+            <div><span style="font-weight:600; font-size:0.8rem; color:#f8fafc;">🤖 LLM Lokal</span><br><span style="font-size:0.7rem; color:#94a3b8;">Ollama Server</span></div>
+            <span style="background:#dc2626; color:#fff; font-size:0.65rem; font-weight:700; padding:2px 6px; border-radius:4px;">🔴 OFFLINE</span>
+        </div>
+        """)
+
     render_html("<hr style='margin:10px 0; border-color:rgba(255,255,255,0.08);'>")
 
     # 1. Past Runs Selector
@@ -2788,11 +2928,13 @@ if active_run:
                         else:
                             val_str = str(val or "-").strip() or "-"
 
+                        raw_method = fitem.get("method", "-") if isinstance(fitem, dict) else "-"
+                        method_label = "🤖 LLM (Qwen 2.5)" if raw_method == "llm_qwen2.5" else raw_method
                         scalar_list.append({
                             "Field": fk,
                             "Nilai Ekstraksi": val_str,
                             "Halaman": fitem.get("page", "-") if isinstance(fitem, dict) else "-",
-                            "Metode": fitem.get("method", "-") if isinstance(fitem, dict) else "-",
+                            "Metode": method_label,
                         })
                     if scalar_list:
                         st.dataframe(pd.DataFrame(scalar_list), use_container_width=True, hide_index=True)

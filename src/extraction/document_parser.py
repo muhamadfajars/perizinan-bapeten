@@ -11,6 +11,7 @@ from src.extraction.generic_parser import (
 )
 from src.extraction.form_parser import extract_form_data, parse_people_tables, split_type_and_serial
 from src.matching.normalizer import normalize_date
+from src.extraction.llm_extractor import merge_with_llm_fallback
 
 
 def _empty(value="-"):
@@ -1473,26 +1474,42 @@ def parse_document(doc_type, pages_text, tables=None, context=None):
             "fields": _finalize_document_fields(doc_type, fields_dict),
         }
 
+    force_llm = bool(context and context.get("force_llm"))
+
     if doc_type == "ppkr":
-        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_ppkr_data(pages_text, tables))}
+        data = extract_ppkr_data(pages_text, tables)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "uji_kesesuaian":
-        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_uji_kesesuaian_data(pages_text, tables))}
+        data = extract_uji_kesesuaian_data(pages_text, tables)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "persetujuan_import":
-        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_persetujuan_import_data(pages_text, tables, context=context))}
+        data = extract_persetujuan_import_data(pages_text, tables, context=context)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "paparan_radiasi":
-        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_paparan_radiasi_data(pages_text, tables))}
+        data = extract_paparan_radiasi_data(pages_text, tables)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "uji_fungsi":
-        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_uji_fungsi_data(pages_text, tables))}
+        data = extract_uji_fungsi_data(pages_text, tables)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "laporan_dosis_awal":
-        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_laporan_dosis_awal_data(pages_text, tables, context=context))}
+        data = extract_laporan_dosis_awal_data(pages_text, tables, context=context)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "gedung_penahan_radiasi":
-        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, extract_gedung_penahan_radiasi_data(pages_text, tables))}
+        data = extract_gedung_penahan_radiasi_data(pages_text, tables)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     generic_fields = [f for f in fields if f not in {"administrative_documents", "personnel_data", "table_of_contents"}]
     generic = extract_generic_fields(pages_text, generic_fields)
@@ -1595,6 +1612,7 @@ def parse_document(doc_type, pages_text, tables=None, context=None):
         }
 
     merged = _merge(generic, special)
+    merged = merge_with_llm_fallback(doc_type, merged, pages_text, force_llm=force_llm)
     for date_key in ("valid_until",):
         item = merged.get(date_key)
         if isinstance(item, dict) and item.get("value") and item.get("value") not in ("-", "—"):
