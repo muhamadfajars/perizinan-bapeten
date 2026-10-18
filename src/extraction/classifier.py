@@ -27,6 +27,7 @@ FILENAME_PATTERNS = [
     (r"\b(?:persetujuan[\s_]+impor|persetujuan[\s_]+import|izin[\s_]+impor|izin[\s_]+import|surat[\s_]+impor|surat[\s_]+import|impor\b|import\b|\bpi[\s_]*(?:alat|sinar|xray|bapeten)\b)\b", "persetujuan_import"),
     (r"\b(?:spesifikasi|spek\b|specification|manual[\s_]+book|datasheet|data[\s_]+sheet|brosur|brochure|technical[\s_]+spec|user[\s_]+manual)\b", "spesifikasi_pesawat"),
     (r"\b(?:label[\s_]+tabung|foto[\s_]+tabung|plat[\s_]+tabung|tube[\s_]+label|tube[\s_]+plate|tube[\s_]+housing|housing[\s_]+tabung|insert[\s_]+tube|insert[\s_]+tabung|tabung[\s_]+sinar|xray[\s_]+tube|x_ray[\s_]+tube)\b", "label_tabung"),
+    (r"\b(?:label[\s_]+(?:unit|pesawat)[\s_]+(?:dan|&|and)?[\s_]*(?:tabung|tube)|foto[\s_]+label[\s_]+(?:unit[\s_]+dan[\s_]+tabung|gabungan)|plat[\s_]+(?:unit[\s_]+dan[\s_]+tabung|gabungan))\b", "label_unit"),
     (r"\b(?:label[\s_]+unit|foto[\s_]+unit|plat[\s_]+unit|unit[\s_]+label|unit[\s_]+plate|foto[\s_]+keseluruhan|generator|xray[\s_]+unit|pesawat[\s_]+sinar|unit[\s_]+pesawat|control[\s_]+panel)\b", "label_unit"),
     (r"\b(?:tabung|tube)\b", "label_tabung"),
     (r"\b(?:unit|pesawat)\b", "label_unit"),
@@ -52,6 +53,7 @@ CONTENT_PATTERNS = [
     (r"UJI\s+KESESUAIAN|LAPORAN\s+HASIL\s+UJI\s+KESESUAIAN|SERTIFIKAT\s+HASIL\s+UJI\s+KESESUAIAN|LEMBAR\s+HASIL\s+UJI\s+KESESUAIAN", "uji_kesesuaian"),
     (r"PERSETUJUAN\s+IMPOR|PERSETUJUAN\s+IMPORT|SURAT\s+PERSETUJUAN\s+IMPOR", "persetujuan_import"),
     (r"SPESIFIKASI\s+TEKNIS|SPESIFIKASI\s+PESAWAT|TECHNICAL\s+SPECIFICATION|SPECIFICATIONS?|RADIOGRAPHIC\s+SYSTEM|OPERATOR[\'S ]+MANUAL|USER[\'S ]+MANUAL|BROCHURE", "spesifikasi_pesawat"),
+    (r"X-RAY\s+TUBE|TUBE\s+HOUSING|TUBE\s+INSERT|ROTANODE|NAMEPLATE|RATING\s+PLATE|LABEL\s+PESAWAT|LABEL\s+TABUNG|LABEL\s+UNIT|管芯型号|产品型号", "label_unit"),
 ]
 
 

@@ -59,19 +59,33 @@ def _find_adjacent_box_value(
         if 0 < float(l.get("y", 0)) - ly < 80 and abs(float(l.get("x", 0)) - lx) < 150
     ]
 
-    combined = candidates_right + candidates_below
+    header_filter = re.compile(
+        r"^(?:MODEL|TYPE|TIPE|S/N|SN|DESC|CE|ETL|MANUFACTURED|DATE|VOLT|KV|MA|INSERT|UNIT|管芯|产品|生产|固有|焦点|使用)\b",
+        re.IGNORECASE,
+    )
+
     valid_candidates = []
-    for c in combined:
+    # Prioritize horizontal candidates (same row)
+    for c in candidates_right:
         txt = str(c.get("text", "")).strip()
-        if not txt or txt.upper() in DISALLOWED_LABEL_VALUES:
-            continue
-        # Avoid label headers
-        if re.match(r"^(?:MODEL|TYPE|S/N|SN|DESC|CE|ETL|MANUFACTURED|DATE|VOLT|KV|MA)\b", txt, re.IGNORECASE):
+        if not txt or txt.upper() in DISALLOWED_LABEL_VALUES or header_filter.match(txt):
             continue
         if is_serial and not re.match(r"^[A-Za-z0-9\-]+$", txt):
             continue
-        dist = (float(c.get("x", 0)) - lx) ** 2 + (float(c.get("y", 0)) - ly) ** 2
+        dy = float(c.get("y", 0)) - ly
+        dx = float(c.get("x", 0)) - lx
+        dist = dx ** 2 + (dy * 2.5) ** 2
         valid_candidates.append((dist, txt, c))
+
+    if not valid_candidates:
+        for c in candidates_below:
+            txt = str(c.get("text", "")).strip()
+            if not txt or txt.upper() in DISALLOWED_LABEL_VALUES or header_filter.match(txt):
+                continue
+            if is_serial and not re.match(r"^[A-Za-z0-9\-]+$", txt):
+                continue
+            dist = (float(c.get("x", 0)) - lx) ** 2 + (float(c.get("y", 0)) - ly) ** 2
+            valid_candidates.append((dist, txt, c))
 
     if valid_candidates:
         valid_candidates.sort(key=lambda item: item[0])
@@ -163,26 +177,38 @@ def extract_brand_dynamically(lines: List[Dict[str, Any]]) -> Tuple[str, Optiona
 
 
 def parse_label_unit(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
-    brand, brand_line = extract_brand_dynamically(lines)
+    # If lines contain a mix of Unit and Tube labels, filter out lines containing tube-only terms
+    tube_indicator_re = re.compile(r"\b(TUBE|HOUSING|INSERT|ROTANODE|ANODE|管芯|FOCAL|FILTRATION|COLLIMATOR|ELECTRON\s+TUBES)\b", re.I)
+    has_unit_indicators = any(re.search(r"\b(GENERATOR|CONTROL|SYSTEM|MEJA|STAND|PESAWAT|PATIENT|CONSOLE|RADIOGRAPHY|DEVICE\s+NAME)\b", str(l.get("text", "")), re.I) for l in lines)
+
+    active_lines = lines
+    if has_unit_indicators:
+        filtered = [l for l in lines if not tube_indicator_re.search(str(l.get("text", "")))]
+        if len(filtered) >= 2:
+            active_lines = filtered
+
+    brand, brand_line = extract_brand_dynamically(active_lines)
 
     # 1. Serial Number: prioritize dedicated S/N or SN label with adjacent box support
     serial, serial_line = "", None
-    for line in sort_by_y(lines):
+    for line in sort_by_y(active_lines):
         text = str(line.get("text", "")).strip()
+        if re.search(r"\b(?:管芯|INSERT|TUBE)\b", text, re.I):
+            continue
         m_s = re.search(r"^(?:S\s*/\s*N|SN|SER(?:IAL)?(?:\s*(?:NO|NUMBER))?\.?)\s*[:\-]?\s*(.*)$", text, re.IGNORECASE)
         if m_s:
             val = m_s.group(1).strip(" :;-\t")
             if val and val.upper() not in DISALLOWED_LABEL_VALUES and re.match(r"^[A-Za-z0-9\-]+$", val):
                 serial, serial_line = val, line
                 break
-            adj_val, adj_line = _find_adjacent_box_value(line, lines, is_serial=True)
+            adj_val, adj_line = _find_adjacent_box_value(line, active_lines, is_serial=True)
             if adj_val and adj_val.upper() not in DISALLOWED_LABEL_VALUES and re.match(r"^[A-Za-z0-9\-]+$", adj_val):
                 serial, serial_line = adj_val, adj_line
                 break
 
     if not serial:
         serial, serial_line = _find_line_value(
-            lines,
+            active_lines,
             [
                 r"(?:S\s*/\s*N|SER(?:IAL)?(?:\s*(?:NO|NUMBER))?\.?)\s*[:\-]?\s*([A-Za-z0-9\-]+)",
                 r"\bSN\s*[:\-]?\s*([A-Za-z0-9\-]+)",
@@ -191,22 +217,25 @@ def parse_label_unit(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     # 2. Unit Model / Type: check commercial description (DESC) first, then MODEL/TYPE
     unit_type, type_line = "", None
-    for line in sort_by_y(lines):
+    for line in sort_by_y(active_lines):
         text = str(line.get("text", "")).strip()
+        if re.search(r"\b(?:HOUSING|INSERT|管芯|TUBE)\b", text, re.I):
+            continue
         m_desc = re.search(r"^(?:DESC(?:RIPTION)?)\s*[:\-]?\s*(.*)$", text, re.IGNORECASE)
         if m_desc:
             val = m_desc.group(1).strip(" :;-\t")
             if val and val.upper() not in DISALLOWED_LABEL_VALUES:
                 unit_type, type_line = val, line
                 break
-            adj_val, adj_line = _find_adjacent_box_value(line, lines)
+            adj_val, adj_line = _find_adjacent_box_value(line, active_lines)
             if adj_val and adj_val.upper() not in DISALLOWED_LABEL_VALUES:
                 unit_type, type_line = adj_val, adj_line
                 break
 
     if not unit_type:
+        non_tube_lines = [l for l in active_lines if not re.search(r"\b(?:HOUSING|INSERT|管芯|TUBE)\b", str(l.get("text", "")), re.I)]
         unit_type, type_line = _find_line_value(
-            lines,
+            non_tube_lines,
             [
                 r"(?:MODEL|MODÈLE|TYPE|TIPE)(?:\s*(?:NO\.?|NUMBER|NAME))?\s*[:\-]?\s*(.+)",
                 r"(?:REF(?:ERENCE)?|CAT(?:ALOG)?)\s*[:\-]?\s*(.+)",
@@ -248,24 +277,110 @@ def parse_label_unit(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def parse_label_tube(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # If lines contain a mix of Unit and Tube labels, isolate tube portion
+    tube_indicator_re = re.compile(r"\b(TUBE|HOUSING|INSERT|ROTANODE|ANODE|管芯|FOCAL|FILTRATION|COLLIMATOR|ELECTRON\s+TUBES)\b", re.I)
+    has_tube_indicators = any(tube_indicator_re.search(str(l.get("text", ""))) for l in lines)
+    has_unit_indicators = any(re.search(r"\b(GENERATOR|CONTROL|SYSTEM|MEJA|STAND|PESAWAT|PATIENT|CONSOLE|RADIOGRAPHY|DEVICE\s+NAME)\b", str(l.get("text", "")), re.I) for l in lines)
+
+    active_lines = lines
+    if has_tube_indicators and has_unit_indicators:
+        tube_ys = [float(l.get("y", 0)) for l in lines if tube_indicator_re.search(str(l.get("text", "")))]
+        if tube_ys:
+            min_ty = min(tube_ys) - 150
+            max_ty = max(tube_ys) + 150
+            region_lines = [l for l in lines if min_ty <= float(l.get("y", 0)) <= max_ty]
+            if len(region_lines) >= 3:
+                active_lines = region_lines
+
     pairs = []
-    for line in sort_by_y(lines):
-        text = str(line.get("text", ""))
-        m_model = re.search(r"(?:MODEL|TYPE|TIPE|HOUSING\s+MODEL|INSERT\s+MODEL)\s*[:\-]?\s*(.+)", text, re.IGNORECASE)
+    for line in sort_by_y(active_lines):
+        text = str(line.get("text", "")).strip()
+        m_model = re.search(r"(?:MODEL|TYPE|TIPE|HOUSING\s+MODEL|INSERT\s+MODEL|管芯型号|产品型号)\s*[:\-]?\s*(.+)", text, re.IGNORECASE)
         if m_model:
-            pairs.append(("model", m_model.group(1).strip(), line))
-        m_serial = re.search(r"(?:SER\.?\s*(?:NO|NUMBER)?\.?|S\s*/\s*N)\s*[:\-]?\s*([A-Za-z0-9\-]+)", text, re.IGNORECASE)
+            val = m_model.group(1).strip()
+            if val and val.upper() not in DISALLOWED_LABEL_VALUES:
+                pairs.append(("model", val, line))
+        m_serial = re.search(r"(?:SER\.?\s*(?:NO|NUMBER)?\.?|S\s*/\s*N|管芯生产序列号|生产序列号)\s*[:\-]?\s*([A-Za-z0-9\-]+)", text, re.IGNORECASE)
         if m_serial:
-            pairs.append(("serial", m_serial.group(1).strip(), line))
+            val = m_serial.group(1).strip()
+            if val and val.upper() not in DISALLOWED_LABEL_VALUES:
+                pairs.append(("serial", val, line))
+
+    # Support adjacent bounding box for tube models and serials
+    insert_models = []
+    housing_models = []
+    generic_models = []
+    insert_serials = []
+    generic_serials = []
+
+    for line in sort_by_y(active_lines):
+        text = str(line.get("text", "")).strip()
+        # Check Insert Model header
+        if re.search(r"^(?:INSERT\s*#?|管芯型号|INSERT\s*MODEL)\b", text, re.I):
+            val, box = _find_adjacent_box_value(line, active_lines)
+            if val and val.upper() not in DISALLOWED_LABEL_VALUES:
+                insert_models.append((val, box or line))
+        # Check Housing / Unit Model header
+        elif re.search(r"^(?:UNIT\s*#?|产品型号|HOUSING\s*MODEL|TUBE\s*HOUSING)\b", text, re.I):
+            val, box = _find_adjacent_box_value(line, active_lines)
+            if val and val.upper() not in DISALLOWED_LABEL_VALUES:
+                housing_models.append((val, box or line))
+        elif re.search(r"^(?:MODEL|TYPE|TIPE)\s*[:\-]?$", text, re.I):
+            val, box = _find_adjacent_box_value(line, active_lines)
+            if val and val.upper() not in DISALLOWED_LABEL_VALUES:
+                generic_models.append((val, box or line))
+
+        # Check Insert Serial header
+        if re.search(r"^(?:管芯生产序列号|INSERT\s*S/?N|INSERT\s*SER)\b", text, re.I):
+            val, box = _find_adjacent_box_value(line, active_lines, is_serial=True)
+            if val and val.upper() not in DISALLOWED_LABEL_VALUES:
+                insert_serials.append((val, box or line))
+        elif re.search(r"^(?:生产序列号|S\s*/\s*N|SN|SER(?:IAL)?(?:\s*(?:NO|NUMBER))?\.?)\s*[:\-]?$", text, re.I):
+            val, box = _find_adjacent_box_value(line, active_lines, is_serial=True)
+            if val and val.upper() not in DISALLOWED_LABEL_VALUES:
+                generic_serials.append((val, box or line))
 
     models = [p for p in pairs if p[0] == "model"]
     serials = [p for p in pairs if p[0] == "serial"]
 
-    brand, brand_line = extract_brand_dynamically(lines)
+    for val, box in insert_models:
+        if not any(m[1] == val for m in models):
+            models.append(("model", val, box))
+    for val, box in housing_models:
+        if not any(m[1] == val for m in models):
+            models.insert(0, ("model", val, box))
+    for val, box in generic_models:
+        if not any(m[1] == val for m in models):
+            models.append(("model", val, box))
 
-    m1_val, m1_line = (models[0][1], models[0][2]) if models else ("", None)
-    m2_val, m2_line = (models[1][1], models[1][2]) if len(models) > 1 else ("", None)
-    s_val, s_line = (serials[-1][1], serials[-1][2]) if serials else ("", None)
+    for val, box in insert_serials:
+        if not any(s[1] == val for s in serials):
+            serials.append(("serial", val, box))
+    for val, box in generic_serials:
+        if not any(s[1] == val for s in serials):
+            serials.append(("serial", val, box))
+
+    brand, brand_line = extract_brand_dynamically(active_lines)
+
+    if insert_models and housing_models:
+        m1_val, m1_line = housing_models[0][0], housing_models[0][1]
+        m2_val, m2_line = insert_models[0][0], insert_models[0][1]
+    elif insert_models:
+        m1_val, m1_line = "", None
+        m2_val, m2_line = insert_models[0][0], insert_models[0][1]
+    elif housing_models:
+        m1_val, m1_line = housing_models[0][0], housing_models[0][1]
+        m2_val, m2_line = (models[1][1], models[1][2]) if len(models) > 1 else ("", None)
+    else:
+        m1_val, m1_line = (models[0][1], models[0][2]) if models else ("", None)
+        m2_val, m2_line = (models[1][1], models[1][2]) if len(models) > 1 else ("", None)
+
+    if insert_serials:
+        s_val, s_line = insert_serials[0][0], insert_serials[0][1]
+    elif serials:
+        s_val, s_line = serials[-1][1], serials[-1][2]
+    else:
+        s_val, s_line = ("", None)
 
     tube_model = m2_val or m1_val
     tube_type_serial = f"{tube_model} / {s_val}".strip(" /") if (tube_model or s_val) else ""

@@ -2,6 +2,7 @@ from pathlib import Path
 from uuid import uuid4
 from datetime import datetime
 import json
+import re
 
 from config import PREPROCESSED_DIR, OCR_DIR, RESULT_DIR, DOCUMENT_TYPES, DOCUMENT_FIELDS
 from src.ocr.preprocess import preprocess_image
@@ -123,21 +124,93 @@ def _convert_label_to_image(path: Path):
     return path, False
 
 
+def _get_label_page_ocr(path: Path, doc_type: str, run_id: str):
+    """Inspects a label file. For multi-page PDFs, selects the page matching doc_type.
+    Returns (lines, page_num, image_path, is_temp).
+    """
+    path = Path(path)
+    from src.ocr.engine import get_file_hash
+    if path.suffix.lower() == ".pdf":
+        import pypdfium2 as pdfium
+        import tempfile
+        try:
+            doc = pdfium.PdfDocument(str(path))
+            try:
+                n_pages = len(doc)
+                if n_pages > 1:
+                    tube_indicator_re = re.compile(
+                        r"\b(TUBE|HOUSING|INSERT|ROTANODE|ANODE|管芯|FOCAL|FILTRATION|COLLIMATOR|TABUNG|ELECTRON\s+TUBES)\b",
+                        re.I,
+                    )
+                    unit_indicator_re = re.compile(
+                        r"\b(GENERATOR|CONTROL|SYSTEM|MEJA|STAND|PESAWAT|PATIENT|CONSOLE|RADIOGRAPHY|DEVICE\s+NAME)\b",
+                        re.I,
+                    )
+
+                    best_lines = []
+                    best_page_idx = 0
+                    best_img_path = None
+
+                    for idx in range(min(n_pages, 5)):
+                        page = doc[idx]
+                        img = page.render(scale=2.0).to_pil()
+                        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                        tmp_path = Path(tmp.name)
+                        tmp.close()
+                        img.save(str(tmp_path))
+
+                        page_hash = get_file_hash(str(tmp_path))
+                        p_lines = run_ocr(str(tmp_path), cache_key=f"{page_hash}_p{idx}")
+                        p_text = " ".join(l.get("text", "") for l in p_lines).upper()
+
+                        is_tube = bool(tube_indicator_re.search(p_text))
+                        is_unit = bool(unit_indicator_re.search(p_text))
+
+                        if doc_type in {"label_tabung", "label_tube"} and is_tube:
+                            return p_lines, idx + 1, tmp_path, True
+                        if doc_type == "label_unit" and (is_unit or (not is_tube and idx == 0)):
+                            return p_lines, idx + 1, tmp_path, True
+
+                        if not best_lines:
+                            best_lines = p_lines
+                            best_page_idx = idx
+                            best_img_path = tmp_path
+                        else:
+                            try:
+                                tmp_path.unlink()
+                            except OSError:
+                                pass
+
+                    if best_lines and best_img_path:
+                        return best_lines, best_page_idx + 1, best_img_path, True
+            finally:
+                doc.close()
+        except Exception:
+            pass
+
+    # Default / single page / image file
+    img_path, is_temp = _convert_label_to_image(path)
+    cache_key = get_file_hash(str(path))
+    lines = run_ocr(str(img_path), cache_key=cache_key)
+    return lines, 1, img_path, is_temp
+
+
 def _process_label(doc_type, path, run_id):
     path = Path(path)
     from src.ocr.engine import get_file_hash
-    cache_key = get_file_hash(str(path))
-    img_path, is_temp = _convert_label_to_image(path)
+    original_lines, page_num, img_path, is_temp = _get_label_page_ocr(path, doc_type, run_id)
+    cache_key = get_file_hash(str(img_path))
     try:
-        original_lines = run_ocr(str(img_path), cache_key=cache_key)
-        ocr_output = OCR_DIR / f"{run_id}_{doc_type}_{path.stem}.json"
+        ocr_output = OCR_DIR / f"{run_id}_{doc_type}_{path.stem}_p{page_num}.json"
         ocr_output.write_text(json.dumps(original_lines, ensure_ascii=False, indent=2), encoding="utf-8")
 
         original = extract_label_data(original_lines, doc_type)
         orig_fields = original.get("fields", {})
 
-        # Check if original image OCR already cleanly extracted required fields.
-        # If yes, we can skip the expensive preprocessing + secondary OCR pass!
+        for f_data in orig_fields.values():
+            if isinstance(f_data, dict) and "page" not in f_data:
+                f_data["page"] = page_num
+
         has_sufficient_fields = False
         if doc_type == "label_unit":
             b = orig_fields.get("unit_brand", {}).get("value")
@@ -156,6 +229,7 @@ def _process_label(doc_type, path, run_id):
                 "file_name": path.name,
                 "file_path": str(path),
                 "source_kind": "image",
+                "page": page_num,
                 "fields": orig_fields,
                 "ocr": {
                     "original_lines": original_lines,
@@ -166,12 +240,11 @@ def _process_label(doc_type, path, run_id):
             }
 
         # Fallback to secondary OCR with image preprocessing if original was incomplete
-        preprocessed_path = PREPROCESSED_DIR / f"{run_id}_{doc_type}_{path.stem}.png"
+        preprocessed_path = PREPROCESSED_DIR / f"{run_id}_{doc_type}_{path.stem}_p{page_num}.png"
         preprocess_image(img_path, preprocessed_path)
-        pre_lines = run_ocr(str(preprocessed_path), cache_key=cache_key + "_pre")
+        pre_lines = run_ocr(str(preprocessed_path), cache_key=cache_key + f"_p{page_num}_pre")
         preprocessed = extract_label_data(pre_lines, doc_type)
 
-        # Prefer an original value when present; use preprocessed OCR only when original is missing.
         fields = {}
         all_keys = set(orig_fields) | set(preprocessed["fields"])
         for key in all_keys:
@@ -183,6 +256,8 @@ def _process_label(doc_type, path, run_id):
                 fields[key] = {**right, "method": "ocr_preprocessed"}
             else:
                 fields[key] = left or right or {"value": "-", "method": "not_found"}
+            if isinstance(fields[key], dict):
+                fields[key]["page"] = page_num
 
         from src.extraction.document_parser import _finalize_document_fields
         fields = _finalize_document_fields(doc_type, fields)
@@ -192,6 +267,7 @@ def _process_label(doc_type, path, run_id):
             "file_name": path.name,
             "file_path": str(path),
             "source_kind": "image",
+            "page": page_num,
             "fields": fields,
             "ocr": {
                 "original_lines": original_lines,
@@ -212,6 +288,19 @@ def execute_run(document_inputs, on_progress=None):
     """Process a mapping {document_type: [paths]} and cross-check extracted fields."""
     run_id = uuid4().hex[:12]
     extractions = {key: [] for key in DOCUMENT_TYPES}
+
+    # Support unified label inputs if provided under 'label_plat'
+    if "label_plat" in document_inputs and document_inputs["label_plat"]:
+        plat_paths = document_inputs["label_plat"]
+        if "label_unit" not in document_inputs:
+            document_inputs["label_unit"] = []
+        if "label_tabung" not in document_inputs:
+            document_inputs["label_tabung"] = []
+        for p in plat_paths:
+            if p not in document_inputs["label_unit"]:
+                document_inputs["label_unit"].append(p)
+            if p not in document_inputs["label_tabung"]:
+                document_inputs["label_tabung"].append(p)
 
     # Calculate total files
     total_files = sum(len(paths) for paths in document_inputs.values() if paths)
@@ -245,12 +334,39 @@ def execute_run(document_inputs, on_progress=None):
 
             if DOCUMENT_TYPES[doc_type]["kind"] == "image":
                 result = _process_label(doc_type, path, run_id)
+                target_bucket = result.get("document_type") or doc_type
+                if target_bucket not in extractions:
+                    extractions[target_bucket] = []
+                extractions[target_bucket].append(result)
+
+                # Automatic dual label extraction: if a label file contains both unit & tube plates
+                other_type = "label_tabung" if doc_type == "label_unit" else "label_unit"
+                if not extractions.get(other_type):
+                    try:
+                        other_res = _process_label(other_type, path, run_id)
+                        o_fields = other_res.get("fields", {})
+                        if other_type == "label_tabung":
+                            has_data = bool(
+                                (o_fields.get("tube_serial_number", {}).get("value") not in ("", None, "-", "—"))
+                                or (o_fields.get("tube_type", {}).get("value") not in ("", None, "-", "—"))
+                            )
+                        else:
+                            has_data = bool(
+                                (o_fields.get("unit_serial_number", {}).get("value") not in ("", None, "-", "—"))
+                                or (o_fields.get("unit_type", {}).get("value") not in ("", None, "-", "—"))
+                            )
+                        if has_data:
+                            extractions[other_type].append(other_res)
+                            if other_type not in document_inputs or not document_inputs[other_type]:
+                                document_inputs[other_type] = [path]
+                    except Exception:
+                        pass
             else:
                 result = _process_pdf(doc_type, path, context=running_context)
-            target_bucket = result.get("document_type") or doc_type
-            if target_bucket not in extractions:
-                extractions[target_bucket] = []
-            extractions[target_bucket].append(result)
+                target_bucket = result.get("document_type") or doc_type
+                if target_bucket not in extractions:
+                    extractions[target_bucket] = []
+                extractions[target_bucket].append(result)
 
             # Update running context with extracted hospital/serial info
             f_fields = result.get("fields", {})
@@ -263,6 +379,11 @@ def execute_run(document_inputs, on_progress=None):
     validate_cross_checks(checks)
     application = consolidate_application(extractions)
     report = generate_cross_check_report(application, extractions, run_id)
+    # Synchronize uploaded label keys if extractions were produced
+    for lk in ["label_unit", "label_tabung"]:
+        if extractions.get(lk) and (lk not in document_inputs or not document_inputs[lk]):
+            document_inputs[lk] = [doc.get("file_path") for doc in extractions[lk] if doc.get("file_path")]
+
     uploaded_keys = [k for k, p in document_inputs.items() if p]
     compliance = evaluate_application_compliance(application, uploaded_keys)
 

@@ -1904,11 +1904,16 @@ with st.sidebar:
                 detected_type, reason = _cached_classify_document(file.name, file.size, fbytes[:512], fbytes)
                 is_conf = reason != "Default"
                 icon = "✅" if is_conf else "⚠️"
+                # If a label document is detected, pre-select both label_unit and label_tabung
+                if detected_type in {"label_unit", "label_tabung"}:
+                    default_cats = ["label_unit", "label_tabung"]
+                else:
+                    default_cats = [detected_type] if detected_type in doc_keys else []
                 with st.expander(f"{icon} {file.name[:25]}", expanded=not is_conf):
                     chosen = st.multiselect(
                         "Kategori Dokumen",
                         options=doc_keys,
-                        default=[detected_type] if detected_type in doc_keys else [],
+                        default=default_cats,
                         format_func=lambda k: doc_names[k],
                         key=f"sb_up_{idx}_{file.name}_{detected_type}",
                         label_visibility="collapsed",
@@ -1918,11 +1923,37 @@ with st.sidebar:
             active_cat = sum(1 for v in upload_map.values() if v)
             st.info(f"📋 {active_cat} dari {len(doc_keys)} jenis dokumen terdeteksi.")
     else:
+        # Unified uploader for label documents (Unit & Tabung)
+        st.markdown("**🏷️ Foto Label Fisik (Unit & Tabung Sinar-X)**")
+        st.caption("Unggah berkas PDF gabungan atau foto fisik plat label unit & tabung sinar-X (.pdf, .jpg, .png)")
+        unified_labels = st.file_uploader(
+            "Foto Label Fisik (Unit & Tabung)",
+            type=["pdf", "jpg", "jpeg", "png", "bmp", "webp"],
+            accept_multiple_files=True,
+            key="sb_manual_unified_label",
+            label_visibility="collapsed",
+        )
+        if unified_labels:
+            upload_map["label_unit"].extend(unified_labels)
+            upload_map["label_tabung"].extend(unified_labels)
+
+        # Other 15 documents
         for doc_type, meta in DOCUMENT_TYPES.items():
+            if doc_type in {"label_unit", "label_tabung"}:
+                continue
             exts = ["pdf"] if meta["kind"] == "pdf" else ["jpg", "jpeg", "png", "bmp", "webp", "pdf"]
             up_files = st.file_uploader(meta["name"], type=exts, accept_multiple_files=True, key=f"sb_manual_{doc_type}")
             if up_files:
                 upload_map[doc_type].extend(up_files)
+
+        with st.expander("⚙️ Opsi: Unggah Terpisah (Unit / Tabung Mandiri)", expanded=False):
+            st.caption("Gunakan ini hanya jika ingin mengunggah ke slot unit atau tabung secara terpisah:")
+            u_only = st.file_uploader("Foto Label Unit Mandiri", type=["pdf", "jpg", "jpeg", "png", "bmp", "webp"], accept_multiple_files=True, key="sb_manual_label_unit_only")
+            if u_only:
+                upload_map["label_unit"].extend(u_only)
+            t_only = st.file_uploader("Foto Label Tabung Mandiri", type=["pdf", "jpg", "jpeg", "png", "bmp", "webp"], accept_multiple_files=True, key="sb_manual_label_tabung_only")
+            if t_only:
+                upload_map["label_tabung"].extend(t_only)
 
     render_html("<div style='height:8px;'></div>")
     process_btn = st.button("🚀 Proses Verifikasi Berkas", type="primary", use_container_width=True)
