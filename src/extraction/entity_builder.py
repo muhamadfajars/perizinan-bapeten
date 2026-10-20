@@ -98,17 +98,25 @@ def find_best_equipment_match(
     unit_type: str,
     equipment_list: List[XRayEquipmentEntity],
 ) -> Optional[XRayEquipmentEntity]:
-    """Finds matching XRayEquipmentEntity based on serial number, or brand + type."""
+    """Finds matching XRayEquipmentEntity based on serial number, tube serial, or brand + type."""
     if not equipment_list:
         return None
 
-    # Priority 1: Match by normalized serial number if present
+    # Priority 1: Match by normalized unit serial number if present
     if serial:
         norm_serial = normalize_serial(serial)
         for eq in equipment_list:
             eq_sn = eq.unit_serial_number.value
             if eq_sn and normalize_serial(eq_sn) == norm_serial:
                 return eq
+
+    # Priority 1b: Match by tube serial number (in case a tube plate is checked against equipment)
+    if serial:
+        norm_serial = normalize_serial(serial)
+        for eq in equipment_list:
+            if eq.tube and eq.tube.tube_serial_number.value:
+                if normalize_serial(eq.tube.tube_serial_number.value) == norm_serial:
+                    return eq
 
     # Priority 2: Match by brand and type
     norm_b = normalize(brand)
@@ -119,6 +127,14 @@ def find_best_equipment_match(
         if norm_b and eq_b and (norm_b in eq_b or eq_b in norm_b):
             if norm_t and eq_t and fuzz.token_sort_ratio(norm_t, eq_t) >= 70:
                 return eq
+
+    # Priority 2b: Match by tube type/model
+    if norm_t:
+        for eq in equipment_list:
+            if eq.tube:
+                tb_t = normalize(eq.tube.tube_type.value or eq.tube.tube_model.value or "")
+                if tb_t and (norm_t in tb_t or tb_t in norm_t):
+                    return eq
 
     # Priority 3: If only 1 equipment unit exists, return it
     if len(equipment_list) == 1:
@@ -372,32 +388,55 @@ def consolidate_application(extractions: Dict[str, List[Dict[str, Any]]]) -> App
 
         matched_eq = find_best_equipment_match(serial, brand, u_type, app.xray_equipment)
         if not matched_eq:
-            # Create a new unit if not matching any
-            new_eq = XRayEquipmentEntity(
-                id=f"unit_label_{len(app.xray_equipment) + 1}",
-                unit_brand=ExtractedField[str].from_value(
-                    value=brand,
-                    document_type="label_unit",
-                    file_name=file_name,
-                    page=1,
-                    extraction_method="ocr",
-                ),
-                unit_type=ExtractedField[str].from_value(
-                    value=u_type,
-                    document_type="label_unit",
-                    file_name=file_name,
-                    page=1,
-                    extraction_method="ocr",
-                ),
-                unit_serial_number=ExtractedField[str].from_value(
-                    value=serial,
-                    document_type="label_unit",
-                    file_name=file_name,
-                    page=1,
-                    extraction_method="ocr",
-                ),
-            )
-            app.xray_equipment.append(new_eq)
+            # Create a new unit ONLY if no equipment exists in the application yet (e.g. no Formulir, no PPKR)
+            if not app.xray_equipment:
+                new_eq = XRayEquipmentEntity(
+                    id=f"unit_label_{len(app.xray_equipment) + 1}",
+                    unit_brand=ExtractedField[str].from_value(
+                        value=brand,
+                        document_type="label_unit",
+                        file_name=file_name,
+                        page=1,
+                        extraction_method="ocr",
+                    ),
+                    unit_type=ExtractedField[str].from_value(
+                        value=u_type,
+                        document_type="label_unit",
+                        file_name=file_name,
+                        page=1,
+                        extraction_method="ocr",
+                    ),
+                    unit_serial_number=ExtractedField[str].from_value(
+                        value=serial,
+                        document_type="label_unit",
+                        file_name=file_name,
+                        page=1,
+                        extraction_method="ocr",
+                    ),
+                )
+                app.xray_equipment.append(new_eq)
+        else:
+            # If the label photo was actually a tube plate matching matched_eq's tube, ensure it's in label_tabung extractions
+            is_tube_label = False
+            if matched_eq.tube and matched_eq.tube.tube_serial_number.value:
+                if serial and normalize_serial(matched_eq.tube.tube_serial_number.value) == normalize_serial(serial):
+                    is_tube_label = True
+            if is_tube_label:
+                if "label_tabung" not in extractions:
+                    extractions["label_tabung"] = []
+                if not any(d.get("file_name") == file_name for d in extractions["label_tabung"]):
+                    from src.extraction.label_parser import extract_label_data
+                    lines_ocr = doc.get("ocr", {}).get("original_lines") or []
+                    tube_res = extract_label_data(lines_ocr, "label_tabung")
+                    extractions["label_tabung"].append({
+                        "document_type": "label_tabung",
+                        "file_name": file_name,
+                        "file_path": doc.get("file_path"),
+                        "source_kind": "image",
+                        "page": doc.get("page", 1),
+                        "fields": tube_res.get("fields", {}),
+                        "ocr": doc.get("ocr", {}),
+                    })
 
     # 6. Consolidate Tube Labels into XRayTube
     label_tube_docs = extractions.get("label_tabung", [])

@@ -1,5 +1,5 @@
 import re
-from typing import Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.matching.normalizer import normalize_date
 
@@ -120,13 +120,44 @@ def _is_valid_facility_candidate(cand: str) -> bool:
     return True
 
 
-def extract_facility_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
+def _score_facility_cand(cand: str, ref_name: str) -> float:
+    if not cand or not ref_name:
+        return 0.0
+    c_norm = re.sub(r"[^A-Z0-9]", "", cand.upper())
+    r_norm = re.sub(r"[^A-Z0-9]", "", ref_name.upper())
+    if c_norm == r_norm or c_norm in r_norm or r_norm in c_norm:
+        return 100.0
+    from rapidfuzz import fuzz
+    tsr = fuzz.token_set_ratio(cand.upper(), ref_name.upper())
+    c_words = {w for w in re.findall(r"[A-Z0-9]+", cand.upper()) if w not in {"RS", "RSUD", "RSUP", "RSJ", "RSIA", "RUMAH", "SAKIT", "KLINIK", "DR", "DOKTER"}}
+    r_words = {w for w in re.findall(r"[A-Z0-9]+", ref_name.upper()) if w not in {"RS", "RSUD", "RSUP", "RSJ", "RSIA", "RUMAH", "SAKIT", "KLINIK", "DR", "DOKTER"}}
+    if c_words and r_words and c_words.intersection(r_words):
+        return max(float(tsr), 85.0)
+    return float(tsr)
+
+
+def _score_addr_cand(cand: str, ref_addr: str) -> float:
+    if not cand or not ref_addr:
+        return 0.0
+    c_words = {w.lower() for w in re.findall(r"[A-Za-z0-9]+", cand) if len(w) >= 3 and w.lower() not in {"jalan", "jl", "nomor", "no", "rt", "rw", "kelurahan", "kel", "kecamatan", "kec", "kota", "kabupaten", "kab", "provinsi", "prov"}}
+    r_words = {w.lower() for w in re.findall(r"[A-Za-z0-9]+", ref_addr) if len(w) >= 3 and w.lower() not in {"jalan", "jl", "nomor", "no", "rt", "rw", "kelurahan", "kel", "kecamatan", "kec", "kota", "kabupaten", "kab", "provinsi", "prov"}}
+    if not r_words or not c_words:
+        return 0.0
+    common = c_words.intersection(r_words)
+    overlap = len(common) / len(r_words)
+    return overlap * 100.0
+
+
+def extract_facility_name(pages_text: List[str], context: Optional[Dict[str, Any]] = None) -> Tuple[str, Optional[int]]:
     """Robustly extracts hospital / facility name from text pages.
 
     1. Matches explicit labels with delimiter (e.g. 'Nama Rumah Sakit : XYZ', 'Instansi : XYZ').
     2. Searches header block, cover page, and Kop Surat on first 2 pages.
     3. Searches recipient blocks (e.g. 'Kepada: ... RS ...') on early pages only.
+    4. When context (e.g. from Formulir Permohonan) is provided, candidate scoring prioritizes matching facility names.
     """
+    candidates: List[Tuple[str, int, int]] = []  # (candidate_string, page_num, pass_priority)
+
     # Pass 1: Explicit labels with delimiter
     for p_idx, page in enumerate(pages_text or [], start=1):
         lines = [l.strip() for l in str(page or "").splitlines() if l.strip()]
@@ -141,7 +172,7 @@ def extract_facility_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
                 val = re.split(r"\||Alamat|Telp|Email|Tanggal|Hal\b|Tube|PASS|FAIL|Mechanical|Collimator", val, flags=re.IGNORECASE)[0].strip(" :;-,")
                 val = re.sub(r"\s+\d+$", "", val).strip(" :;-,")
                 if _is_valid_facility_candidate(val):
-                    return val, p_idx
+                    candidates.append((val, p_idx, 1))
 
     # Pass 2: Header box / prominent lines on first 2 pages
     for p_idx in range(min(2, len(pages_text or []))):
@@ -154,14 +185,14 @@ def extract_facility_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
             if m_dir:
                 cand = clean_value(m_dir.group(1)).strip(" :;-,")
                 if _is_valid_facility_candidate(cand):
-                    return cand, p_idx + 1
+                    candidates.append((cand, p_idx + 1, 2))
             m = re.match(r"^(?:(?:RUMAH\s+SAKIT|RS|RUMKIT|RSUD|RSUP|KLINIK)\s+[A-Za-z0-9\s\.\-–]+)$", line, re.I)
             if m:
                 cand = clean_value(m.group(0)).strip(" :;-,")
                 cand = re.sub(r"\s+(?:Provinsi|Kabupaten|Kota)\b.*$", "", cand, flags=re.I).strip(" :;-,")
                 cand = re.sub(r"\s+\d+$", "", cand).strip(" :;-,")
                 if _is_valid_facility_candidate(cand):
-                    return cand, p_idx + 1
+                    candidates.append((cand, p_idx + 1, 2))
 
     # Pass 3: General regex on early pages (skipping table of contents & generic context)
     for p_idx in range(min(2, len(pages_text or []))):
@@ -180,7 +211,7 @@ def extract_facility_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
                 cand = re.sub(r"\s+(?:Provinsi|Kabupaten|Kota)\b.*$", "", cand, flags=re.I).strip(" :;-,")
                 cand = re.sub(r"\s+\d+$", "", cand).strip(" :;-,")
                 if _is_valid_facility_candidate(cand):
-                    return cand, p_idx + 1
+                    candidates.append((cand, p_idx + 1, 3))
 
     # Pass 4: Recipient blocks (only on first 2 pages)
     for p_idx in range(min(2, len(pages_text or []))):
@@ -195,7 +226,33 @@ def extract_facility_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
                         val = clean_value(m_rs.group(1)).strip(" :;-,")
                         val = re.sub(r"\s+\d+$", "", val).strip(" :;-,")
                         if _is_valid_facility_candidate(val):
-                            return val, p_idx + 1
+                            candidates.append((val, p_idx + 1, 4))
+
+    # Evaluate candidates with context guidance if reference hospital name is available
+    ref_name = (context.get("hospital_name") or "").strip() if context else ""
+    if ref_name and candidates:
+        best_cand = max(candidates, key=lambda c: (_score_facility_cand(c[0], ref_name), -c[2]))
+        if _score_facility_cand(best_cand[0], ref_name) >= 70.0:
+            return best_cand[0], best_cand[1]
+
+    # Search early pages for lines containing reference hospital keywords if candidates missed
+    if ref_name:
+        sig_words = [w for w in re.findall(r"[A-Za-z0-9]+", ref_name.upper()) if w not in {"RS", "RSUD", "RSUP", "RSJ", "RSIA", "RUMAH", "SAKIT", "KLINIK", "DR", "DOKTER"} and len(w) >= 3]
+        if sig_words:
+            for p_idx in range(min(3, len(pages_text or []))):
+                for line in str(pages_text[p_idx] or "").splitlines():
+                    line_u = line.upper()
+                    if any(w in line_u for w in sig_words) and re.search(r"\b(?:RS|RUMAH\s+SAKIT|RSUD|RSJ|RSIA|KLINIK|RUMKIT)\b", line_u):
+                        m_f = re.search(r"\b((?:RS|RUMAH\s+SAKIT|RSUD|RSJ|RSIA|KLINIK|RUMKIT)[ \t]+[A-Za-z0-9\.\-–]+(?:\s+[A-Za-z0-9\.\-–]+)*)", line, re.I)
+                        if m_f:
+                            cand = clean_value(m_f.group(1)).strip(" :;-,")
+                            if _is_valid_facility_candidate(cand):
+                                return cand, p_idx + 1
+
+    if candidates:
+        # Return first candidate by order of pass priority
+        candidates.sort(key=lambda c: c[2])
+        return candidates[0][0], candidates[0][1]
 
     return "", None
 
@@ -206,8 +263,11 @@ VENDOR_HEADER_ADDR_RE = re.compile(
 )
 
 
-def extract_facility_address(pages_text: List[str]) -> Tuple[str, Optional[int]]:
+def extract_facility_address(pages_text: List[str], context: Optional[Dict[str, Any]] = None) -> Tuple[str, Optional[int]]:
     """Extracts hospital / facility address from text pages with multi-line administrative continuation."""
+    ref_addr = (context.get("hospital_address") or "").strip() if context else ""
+    addr_candidates: List[Tuple[str, int]] = []
+
     label_patterns = [
         r"(?:Customer\s+Address|Hospital\s+Address|Alamat(?:\s+Rumah\s+Sakit|\s+RS|\s+Instansi|\s+Fasilitas|\s+Pelanggan)?|Address)\s*[:=\-–]?\s*([^\n\r]+)",
     ]
@@ -222,7 +282,7 @@ def extract_facility_address(pages_text: List[str]) -> Tuple[str, Optional[int]]
                     flags=re.I,
                 )[0].strip(" :;-,")
                 if len(val) >= 6 and not VENDOR_HEADER_ADDR_RE.search(val):
-                    return val, p_idx
+                    addr_candidates.append((val, p_idx))
 
     # Look for Jl. or Jalan in first 3 pages
     for p_idx in range(min(3, len(pages_text or []))):
@@ -255,7 +315,15 @@ def extract_facility_address(pages_text: List[str]) -> Tuple[str, Optional[int]]
                     full_addr = ", ".join(parts)
                     full_addr = re.sub(r",\s*,", ",", full_addr)
                     if not VENDOR_HEADER_ADDR_RE.search(full_addr):
-                        return full_addr, p_idx + 1
+                        addr_candidates.append((full_addr, p_idx + 1))
+
+    if ref_addr and addr_candidates:
+        best_addr = max(addr_candidates, key=lambda a: _score_addr_cand(a[0], ref_addr))
+        if _score_addr_cand(best_addr[0], ref_addr) >= 30.0:
+            return best_addr[0], best_addr[1]
+
+    if addr_candidates:
+        return addr_candidates[0][0], addr_candidates[0][1]
 
     return "", None
 
@@ -281,8 +349,17 @@ def find_document_number(text: str) -> str:
 
 
 
-def extract_person_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
+def extract_person_name(pages_text: List[str], context: Optional[Dict[str, Any]] = None) -> Tuple[str, Optional[int]]:
     """Extracts doctor, specialist, or officer name while avoiding table header strings."""
+    ref_names = []
+    if context:
+        for k in ("person_name", "ppr_name"):
+            val = str(context.get(k) or "").strip()
+            if val and val not in ("-", "—"):
+                ref_names.append(val)
+
+    person_candidates: List[Tuple[str, int]] = []
+
     # Pass 1: Look for doctor title patterns
     for p_idx in range(min(3, len(pages_text or []))):
         lines = [l.strip() for l in str(pages_text[p_idx] or "").splitlines() if l.strip()]
@@ -295,7 +372,7 @@ def extract_person_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
             if m:
                 cand = clean_value(m.group(1)).strip(" ,")
                 if len(cand) >= 5 and not re.search(r"Jabatan|Tanggal|Tanda", cand, re.IGNORECASE):
-                    return cand, p_idx + 1
+                    person_candidates.append((cand, p_idx + 1))
 
     # Pass 2: Look for labeled person names, rejecting table headers
     for p_idx in range(min(3, len(pages_text or []))):
@@ -308,7 +385,17 @@ def extract_person_name(pages_text: List[str]) -> Tuple[str, Optional[int]]:
                 cand = clean_value(m.group(1)).strip(" ,")
                 if not re.search(r"\b(?:Jabatan|Tanda\s*Tangan|Tanggal|Status|Keterangan)\b", cand, re.IGNORECASE):
                     if len(cand) >= 3:
-                        return cand, p_idx + 1
+                        person_candidates.append((cand, p_idx + 1))
+
+    if ref_names and person_candidates:
+        from rapidfuzz import fuzz
+        for cand, p_num in person_candidates:
+            for rn in ref_names:
+                if fuzz.token_set_ratio(cand.upper(), rn.upper()) >= 75:
+                    return cand, p_num
+
+    if person_candidates:
+        return person_candidates[0][0], person_candidates[0][1]
 
     return "", None
 
@@ -333,16 +420,17 @@ def extract_numbered_list_or_block(text: str, heading_labels: Iterable[str], sto
     return ""
 
 
-def extract_generic_fields(pages_text: List[str], field_keys: List[str]) -> dict:
+def extract_generic_fields(pages_text: List[str], field_keys: List[str], context: Optional[Dict[str, Any]] = None) -> dict:
     """Rule-based extraction from PDF text pages.
 
     Uses specialized robust extractors for facility name, address, document number,
     and person name, avoiding common Indonesian administrative OCR / table collisions.
+    When context is supplied, uses ground truth entities to guide extraction and resolve ambiguities.
     """
     result = {key: {"value": "", "page": None, "method": "native_text", "confidence": None} for key in field_keys}
 
     if "hospital_name" in field_keys:
-        h_val, h_page = extract_facility_name(pages_text)
+        h_val, h_page = extract_facility_name(pages_text, context=context)
         if h_val:
             result["hospital_name"] = {
                 "value": h_val,
@@ -353,7 +441,7 @@ def extract_generic_fields(pages_text: List[str], field_keys: List[str]) -> dict
             }
 
     if "hospital_address" in field_keys:
-        a_val, a_page = extract_facility_address(pages_text)
+        a_val, a_page = extract_facility_address(pages_text, context=context)
         if a_val:
             result["hospital_address"] = {
                 "value": a_val,
@@ -364,7 +452,7 @@ def extract_generic_fields(pages_text: List[str], field_keys: List[str]) -> dict
             }
 
     if "person_name" in field_keys:
-        p_val, p_page = extract_person_name(pages_text)
+        p_val, p_page = extract_person_name(pages_text, context=context)
         if p_val:
             result["person_name"] = {
                 "value": p_val,
@@ -388,7 +476,7 @@ def extract_generic_fields(pages_text: List[str], field_keys: List[str]) -> dict
 
             if value:
                 if key in {"unit_type", "unit_serial_number", "tube_type", "tube_model", "tube_serial_number"}:
-                    value = despace_value(value)
+                    value = despace_value(value).strip(" :;-,.")
                 if key == "valid_until":
                     value = normalize_date(value)
                 result[key] = {
@@ -398,6 +486,32 @@ def extract_generic_fields(pages_text: List[str], field_keys: List[str]) -> dict
                     "method": "native_text_regex",
                     "confidence": 1.0,
                 }
+
+    # Context-guided confirmation: if critical equipment fields are missing, check if context serials/types appear in text
+    if context:
+        equipment_guidance = [
+            ("unit_serial_number", context.get("unit_serial_number")),
+            ("tube_serial_number", context.get("tube_serial_number")),
+            ("unit_brand", context.get("unit_brand")),
+            ("unit_type", context.get("unit_type")),
+            ("tube_brand", context.get("tube_brand")),
+            ("tube_type", context.get("tube_type")),
+        ]
+        for field_k, ref_v in equipment_guidance:
+            if field_k in field_keys and (not result[field_k]["value"] or result[field_k]["value"] in ("-", "—")):
+                ref_str = str(ref_v or "").strip()
+                if ref_str and ref_str not in ("-", "—") and len(ref_str) >= 3:
+                    for p_idx, p_text in enumerate(pages_text, start=1):
+                        p_str = str(p_text or "")
+                        if re.search(r"\b" + re.escape(ref_str) + r"\b", p_str, re.I):
+                            result[field_k] = {
+                                "value": ref_str,
+                                "page": p_idx,
+                                "line": None,
+                                "method": "context_guided_regex",
+                                "confidence": 1.0,
+                            }
+                            break
 
     return result
 

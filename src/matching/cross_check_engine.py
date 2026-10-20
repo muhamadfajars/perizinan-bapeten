@@ -905,7 +905,7 @@ def cross_check_equipment(
         serial_sources = []
 
         # 1. Formulir evidence
-        if eq.unit_brand.evidence:
+        if eq.unit_brand.evidence and getattr(eq.unit_brand.evidence, "document_type", None) == "formulir":
             brand_sources.append(
                 SourceEvidence(
                     document_type="formulir",
@@ -914,7 +914,7 @@ def cross_check_equipment(
                     value=unit_brand,
                 )
             )
-        if eq.unit_type.evidence:
+        if eq.unit_type.evidence and getattr(eq.unit_type.evidence, "document_type", None) == "formulir":
             type_sources.append(
                 SourceEvidence(
                     document_type="formulir",
@@ -923,7 +923,7 @@ def cross_check_equipment(
                     value=unit_type,
                 )
             )
-        if eq.unit_serial_number.evidence:
+        if eq.unit_serial_number.evidence and getattr(eq.unit_serial_number.evidence, "document_type", None) == "formulir":
             serial_sources.append(
                 SourceEvidence(
                     document_type="formulir",
@@ -965,7 +965,9 @@ def cross_check_equipment(
             l_serial = str(f.get("unit_serial_number", {}).get("value") or "").strip()
 
             is_match = False
-            if unit_serial and l_serial and normalize_serial(unit_serial) == normalize_serial(l_serial):
+            if unit_serial and l_serial and (normalize_serial(unit_serial) == normalize_serial(l_serial) or normalize_serial(unit_serial) in normalize_serial(l_serial) or normalize_serial(l_serial) in normalize_serial(unit_serial)):
+                is_match = True
+            elif unit_type and l_type and (normalize(unit_type) in normalize(l_type) or normalize(l_type) in normalize(unit_type)):
                 is_match = True
             elif not unit_serial and (unit_brand and l_brand and normalize_brand(unit_brand) == normalize_brand(l_brand)):
                 is_match = True
@@ -1136,10 +1138,19 @@ def cross_check_tubes(
             else:
                 lt_type = unit_model or ins_model
             lt_serial = str(f.get("tube_serial_number", {}).get("value") or "").strip()
+            h_serial = str(f.get("tube_housing_serial", {}).get("value") or "").strip()
+            ins_serial = str(f.get("tube_insert_serial", {}).get("value") or "").strip()
 
             is_match = False
-            if t_serial and lt_serial and normalize_serial(t_serial) == normalize_serial(lt_serial):
-                is_match = True
+            if t_serial:
+                if lt_serial and normalize_serial(t_serial) == normalize_serial(lt_serial):
+                    is_match = True
+                elif h_serial and normalize_serial(t_serial) == normalize_serial(h_serial):
+                    is_match = True
+                    lt_serial = h_serial
+                elif ins_serial and normalize_serial(t_serial) == normalize_serial(ins_serial):
+                    is_match = True
+                    lt_serial = ins_serial
             elif not t_serial:
                 is_match = True
 

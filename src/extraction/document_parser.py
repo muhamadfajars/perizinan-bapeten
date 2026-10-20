@@ -9,6 +9,8 @@ from src.extraction.generic_parser import (
     extract_raw_blocks,
     clean_value,
     VENDOR_HEADER_ADDR_RE,
+    _score_facility_cand,
+    _score_addr_cand,
 )
 from src.extraction.form_parser import extract_form_data, parse_people_tables, split_type_and_serial
 from src.matching.normalizer import normalize_date
@@ -223,8 +225,8 @@ def _extract_tube_insert_model(all_text: str) -> str:
 
 
 
-def extract_ppkr_data(pages_text, tables):
-    """Parses PPKR document text and structured personnel tables."""
+def extract_ppkr_data(pages_text, tables, context=None):
+    """Parses PPKR document text and structured personnel tables with context guidance."""
     fields = extract_generic_fields(
         pages_text,
         [
@@ -233,6 +235,7 @@ def extract_ppkr_data(pages_text, tables):
             "unit_serial_number", "tube_brand", "tube_type",
             "tube_serial_number",
         ],
+        context=context,
     )
     # Prioritize Tube Insert Serial Number (e.g. 'Nomor seriinsersi 0F1376') over Housing S/N
     for p_idx, page_text in enumerate(pages_text, start=1):
@@ -607,7 +610,7 @@ def extract_sprint_data(pages_text: List[str]) -> Dict[str, Any]:
     }
 
 
-def extract_uji_kesesuaian_data(pages_text, tables=None):
+def extract_uji_kesesuaian_data(pages_text, tables=None, context=None):
     all_text = "\n".join(pages_text)
 
     # 1. hospital_name
@@ -617,6 +620,10 @@ def extract_uji_kesesuaian_data(pages_text, tables=None):
         re.I,
     )
     hospital_name = clean_value(m_name.group(1)).strip(" :;-,") if m_name else ""
+    if not hospital_name:
+        fac_n, _ = extract_facility_name(pages_text, context=context)
+        if fac_n:
+            hospital_name = fac_n
 
     # 2. hospital_address
     m_addr = re.search(
@@ -625,6 +632,10 @@ def extract_uji_kesesuaian_data(pages_text, tables=None):
         re.I,
     )
     hospital_address = clean_value(m_addr.group(1)).strip(" :;-,") if m_addr else ""
+    if not hospital_address:
+        fac_a, _ = extract_facility_address(pages_text, context=context)
+        if fac_a:
+            hospital_address = fac_a
 
     # 3. Generator section (unit_brand, unit_type, unit_serial_number, unit_type_serial)
     gen_block = ""
@@ -648,11 +659,6 @@ def extract_uji_kesesuaian_data(pages_text, tables=None):
     if not m_us:
         m_us = re.search(r"(?:Nomor\s+Seri(?!\s+Tabung)|No\.?\s*Seri(?!\s+Tabung))\s*[:=\-–]?\s*([^\n\r]+)", all_text, re.I)
     unit_serial = clean_value(m_us.group(1)).strip(" :;-,") if m_us else ""
-
-    if unit_type and unit_serial:
-        unit_type_serial = f"{unit_type} / {unit_serial}"
-    else:
-        unit_type_serial = unit_type or unit_serial
 
     # 4. Tube section (tube_brand, tube_type, tube_serial_number)
     m_tb = re.search(r"(?:Merek\s+Tabung|Merk\s+Tabung)\s*[:=\-–]?\s*([^\n\r]+)", all_text, re.I)
@@ -678,6 +684,44 @@ def extract_uji_kesesuaian_data(pages_text, tables=None):
         m_ts = re.search(r"B\.\s*Wadah\s+Tabung[^\n]*\n(?:[^\n]*\n){0,4}?[0-9]\.\s*Nomor\s+Seri\s+([^\n\r]+)", all_text, re.I)
     tube_serial = clean_value(m_ts.group(1)).strip(" :;-,") if m_ts else ""
     tube_serial = _normalize_ocr_serial(tube_serial)
+
+    # 5. Prior-guided confirmation if context is available
+    if context:
+        ref_usn = str(context.get("unit_serial_number") or "").strip()
+        if ref_usn and len(ref_usn) >= 3 and ref_usn not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_usn) + r"\b", all_text, re.I):
+                unit_serial = ref_usn
+
+        ref_tsn = str(context.get("tube_serial_number") or "").strip()
+        if ref_tsn and len(ref_tsn) >= 3 and ref_tsn not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_tsn) + r"\b", all_text, re.I) or _normalize_ocr_serial(ref_tsn).upper() in all_text.upper():
+                tube_serial = ref_tsn
+
+        ref_ub = str(context.get("unit_brand") or "").strip()
+        if ref_ub and len(ref_ub) >= 2 and ref_ub not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_ub) + r"\b", all_text, re.I):
+                unit_brand = ref_ub
+
+        ref_ut = str(context.get("unit_type") or "").strip()
+        if ref_ut and len(ref_ut) >= 3 and ref_ut not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_ut) + r"\b", all_text, re.I):
+                unit_type = ref_ut
+
+        ref_tb = str(context.get("tube_brand") or "").strip()
+        if ref_tb and len(ref_tb) >= 2 and ref_tb not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_tb) + r"\b", all_text, re.I):
+                tube_brand = ref_tb
+
+        ref_tt = str(context.get("tube_type") or "").strip()
+        if ref_tt and len(ref_tt) >= 3 and ref_tt not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_tt) + r"\b", all_text, re.I):
+                tube_type = ref_tt
+
+    if unit_type and unit_serial:
+        unit_type_serial = f"{unit_type} / {unit_serial}"
+    else:
+        unit_type_serial = unit_type or unit_serial
+
     tube_type_serial = f"{tube_type} / {tube_serial}".strip(" /") if (tube_type or tube_serial) else ""
 
     return {
@@ -942,7 +986,7 @@ def extract_persetujuan_import_data(pages_text, tables=None, context=None):
 
 
 
-def extract_paparan_radiasi_data(pages_text, tables=None):
+def extract_paparan_radiasi_data(pages_text, tables=None, context=None):
     all_text = "\n".join(pages_text)
 
     # 1. hospital_name
@@ -955,7 +999,7 @@ def extract_paparan_radiasi_data(pages_text, tables=None):
         m_name = re.search(r"Nama\s+(?:Rumah\s+Sakit|Fasilitas|Instansi)\s*[:=\-–]?\s*([^\n\r]+)", all_text, re.I)
     hospital_name = clean_value(m_name.group(1)).strip(" :;-,") if m_name else ""
     if not hospital_name:
-        fac_name, _ = extract_facility_name(pages_text)
+        fac_name, _ = extract_facility_name(pages_text, context=context)
         if fac_name:
             hospital_name = fac_name
 
@@ -1002,7 +1046,7 @@ def extract_paparan_radiasi_data(pages_text, tables=None):
                 hospital_address = cand
 
     if not hospital_address:
-        fac_addr, _ = extract_facility_address(pages_text)
+        fac_addr, _ = extract_facility_address(pages_text, context=context)
         if fac_addr:
             hospital_address = fac_addr
 
@@ -1142,6 +1186,40 @@ def extract_paparan_radiasi_data(pages_text, tables=None):
             tube_serial = clean_value(m_cand.group(1)).strip(" :;-,") if m_cand else ""
 
     tube_serial = _normalize_ocr_serial(tube_serial)
+
+    # Context guidance for equipment fields
+    if context:
+        ref_usn = str(context.get("unit_serial_number") or "").strip()
+        if ref_usn and len(ref_usn) >= 3 and ref_usn not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_usn) + r"\b", all_text, re.I):
+                unit_serial = ref_usn
+
+        ref_tsn = str(context.get("tube_serial_number") or "").strip()
+        if ref_tsn and len(ref_tsn) >= 3 and ref_tsn not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_tsn) + r"\b", all_text, re.I) or _normalize_ocr_serial(ref_tsn).upper() in all_text.upper():
+                tube_serial = ref_tsn
+
+        ref_ub = str(context.get("unit_brand") or "").strip()
+        if ref_ub and len(ref_ub) >= 2 and ref_ub not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_ub) + r"\b", all_text, re.I):
+                unit_brand = ref_ub
+
+        ref_ut = str(context.get("unit_type") or "").strip()
+        if ref_ut and len(ref_ut) >= 3 and ref_ut not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_ut) + r"\b", all_text, re.I):
+                unit_type = ref_ut
+
+        ref_tb = str(context.get("tube_brand") or "").strip()
+        if ref_tb and len(ref_tb) >= 2 and ref_tb not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_tb) + r"\b", all_text, re.I):
+                tube_brand = ref_tb
+
+        ref_tt = str(context.get("tube_type") or "").strip()
+        if ref_tt and len(ref_tt) >= 3 and ref_tt not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_tt) + r"\b", all_text, re.I):
+                tube_type = ref_tt
+
+    unit_type_serial = f"{unit_type} / {unit_serial}".strip(" /")
     tube_type_serial = f"{tube_type} / {tube_serial}".strip(" /")
 
     # 8. Keberterimaan paparan radiasi / kebocoran tabung
@@ -1186,8 +1264,11 @@ def _clean_inspection_artifacts(text: str) -> str:
     return cleaned.strip(" :;-,")
 
 
-def extract_uji_fungsi_data(pages_text, tables=None):
+def extract_uji_fungsi_data(pages_text, tables=None, context=None):
     all_text = "\n".join(pages_text)
+
+    ref_hname = str(context.get("hospital_name") or "").strip() if context else ""
+    ref_haddr = str(context.get("hospital_address") or "").strip() if context else ""
 
     # 1. hospital_name (Extract candidates from Customer/Hospital name labels across pages and score them)
     name_cands = []
@@ -1225,12 +1306,16 @@ def extract_uji_fungsi_data(pages_text, tables=None):
             score += 50
         if re.search(r"\b(?:Equipment|Report|Date|Time)\b", name, re.I):
             score -= 20
+        if ref_hname:
+            cand_sc = _score_facility_cand(name, ref_hname)
+            if cand_sc >= 70.0:
+                score += 150
         return score
 
     hospital_name = max(name_cands, key=score_name) if name_cands else ""
 
     if not hospital_name:
-        fac_name, _ = extract_facility_name(pages_text)
+        fac_name, _ = extract_facility_name(pages_text, context=context)
         if fac_name:
             hospital_name = _clean_inspection_artifacts(fac_name)
         else:
@@ -1286,12 +1371,16 @@ def extract_uji_fungsi_data(pages_text, tables=None):
             score += 50
         if re.search(r"\b(?:Kota|Kab|Kec|Aceh|Jakarta|Bandung|Surabaya|Medan|\d{5})\b", addr, re.I):
             score += 30
+        if ref_haddr:
+            cand_sc = _score_addr_cand(addr, ref_haddr)
+            if cand_sc >= 30.0:
+                score += 150
         return score
 
     hospital_address = max(addr_cands, key=score_addr) if addr_cands else ""
 
     if not hospital_address:
-        fac_addr, _ = extract_facility_address(pages_text)
+        fac_addr, _ = extract_facility_address(pages_text, context=context)
         if fac_addr and not VENDOR_HEADER_ADDR_RE.search(fac_addr):
             hospital_address = fac_addr
 
@@ -1376,8 +1465,6 @@ def extract_uji_fungsi_data(pages_text, tables=None):
             m_sn_digits = re.search(r"(?:Serial\s+number|Nomor\s+seri)(?:[^\d\n]|[\n\r])*?(\d{2,})", all_text, re.I)
             unit_serial = m_sn_digits.group(1).strip() if m_sn_digits else ""
 
-    unit_type_serial = f"{unit_type} / {unit_serial}".strip(" /")
-
     # 6. Tube details
     m_insert = re.search(RX_INSERT_SERIAL, all_text, re.I)
     m_housing = re.search(RX_HOUSING_SERIAL, all_text, re.I)
@@ -1423,6 +1510,39 @@ def extract_uji_fungsi_data(pages_text, tables=None):
         elif "SIEMENS" in all_text.upper() and ("SOMATOM" in all_text.upper() or "HEALTHINEERS" in all_text.upper()):
             tube_brand = "Siemens"
 
+    # Context guidance for equipment fields
+    if context:
+        ref_usn = str(context.get("unit_serial_number") or "").strip()
+        if ref_usn and len(ref_usn) >= 3 and ref_usn not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_usn) + r"\b", all_text, re.I):
+                unit_serial = ref_usn
+
+        ref_tsn = str(context.get("tube_serial_number") or "").strip()
+        if ref_tsn and len(ref_tsn) >= 3 and ref_tsn not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_tsn) + r"\b", all_text, re.I) or _normalize_ocr_serial(ref_tsn).upper() in all_text.upper():
+                tube_serial = ref_tsn
+
+        ref_ub = str(context.get("unit_brand") or "").strip()
+        if ref_ub and len(ref_ub) >= 2 and ref_ub not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_ub) + r"\b", all_text, re.I):
+                unit_brand = ref_ub
+
+        ref_ut = str(context.get("unit_type") or "").strip()
+        if ref_ut and len(ref_ut) >= 3 and ref_ut not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_ut) + r"\b", all_text, re.I):
+                unit_type = ref_ut
+
+        ref_tb = str(context.get("tube_brand") or "").strip()
+        if ref_tb and len(ref_tb) >= 2 and ref_tb not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_tb) + r"\b", all_text, re.I):
+                tube_brand = ref_tb
+
+        ref_tt = str(context.get("tube_type") or "").strip()
+        if ref_tt and len(ref_tt) >= 3 and ref_tt not in ("-", "—"):
+            if re.search(r"\b" + re.escape(ref_tt) + r"\b", all_text, re.I):
+                tube_type = ref_tt
+
+    unit_type_serial = f"{unit_type} / {unit_serial}".strip(" /")
     tube_type_serial = f"{tube_type} / {tube_serial}".strip(" /")
 
     return {
@@ -1643,42 +1763,42 @@ def parse_document(doc_type, pages_text, tables=None, context=None):
     force_llm = bool(context and context.get("force_llm"))
 
     if doc_type == "ppkr":
-        data = extract_ppkr_data(pages_text, tables)
-        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        data = extract_ppkr_data(pages_text, tables, context=context)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm, context=context)
         return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "uji_kesesuaian":
-        data = extract_uji_kesesuaian_data(pages_text, tables)
-        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        data = extract_uji_kesesuaian_data(pages_text, tables, context=context)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm, context=context)
         return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "persetujuan_import":
         data = extract_persetujuan_import_data(pages_text, tables, context=context)
-        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm, context=context)
         return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "paparan_radiasi":
-        data = extract_paparan_radiasi_data(pages_text, tables)
-        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        data = extract_paparan_radiasi_data(pages_text, tables, context=context)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm, context=context)
         return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "uji_fungsi":
-        data = extract_uji_fungsi_data(pages_text, tables)
-        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        data = extract_uji_fungsi_data(pages_text, tables, context=context)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm, context=context)
         return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "laporan_dosis_awal":
         data = extract_laporan_dosis_awal_data(pages_text, tables, context=context)
-        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm, context=context)
         return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     if doc_type == "gedung_penahan_radiasi":
         data = extract_gedung_penahan_radiasi_data(pages_text, tables)
-        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm)
+        data = merge_with_llm_fallback(doc_type, data, pages_text, force_llm=force_llm, context=context)
         return {"document_type": doc_type, "fields": _finalize_document_fields(doc_type, data)}
 
     generic_fields = [f for f in fields if f not in {"administrative_documents", "personnel_data", "table_of_contents"}]
-    generic = extract_generic_fields(pages_text, generic_fields)
+    generic = extract_generic_fields(pages_text, generic_fields, context=context)
     special = {}
 
     if doc_type == "sip":
@@ -1773,7 +1893,7 @@ def parse_document(doc_type, pages_text, tables=None, context=None):
         }
 
     merged = _merge(generic, special)
-    merged = merge_with_llm_fallback(doc_type, merged, pages_text, force_llm=force_llm)
+    merged = merge_with_llm_fallback(doc_type, merged, pages_text, force_llm=force_llm, context=context)
     for date_key in ("valid_until",):
         item = merged.get(date_key)
         if isinstance(item, dict) and item.get("value") and item.get("value") not in ("-", "—"):

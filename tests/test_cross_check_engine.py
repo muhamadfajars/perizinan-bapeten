@@ -839,6 +839,96 @@ def test_cross_check_homonym_personnel_with_ppr_and_radiographer():
     assert p4.fields["profession"].status in (MatchingStatus.SESUAI, MatchingStatus.PERLU_REVIEW)
 
 
+def test_no_phantom_units_when_formulir_has_two_units():
+    """Formulir declares 2 equipment units. Uploading tube plates named 'label_unit_1.jpeg'
+
+    must NOT create a phantom 3rd equipment unit, and must match tube cross-checks.
+    """
+    from src.extraction.entity_builder import consolidate_application
+    from src.matching.cross_check_engine import generate_cross_check_report
+
+    extractions = {
+        "formulir": [
+            {
+                "file_name": "formulir_hermina.pdf",
+                "fields": {
+                    "hospital_name": {"value": "RS Hermina Kepanjen"},
+                    "all_xray_rows": [
+                        {
+                            "unit_brand": "United Imaging Healthcare",
+                            "unit_type": "uDR 566i-A",
+                            "unit_serial_number": "294248",
+                            "tube_brand": "Canon",
+                            "tube_type": "E7876",
+                            "tube_serial_number": "25D1063",
+                        },
+                        {
+                            "unit_brand": "United Imaging Healthcare",
+                            "unit_type": "uDR 380i",
+                            "unit_serial_number": "422867",
+                            "tube_brand": "Canon",
+                            "tube_type": "XRR-3332",
+                            "tube_serial_number": "4K0493",
+                        },
+                    ],
+                },
+            }
+        ],
+        "label_unit": [
+            {
+                "file_name": "label_unit_1.jpeg",
+                "fields": {
+                    "unit_brand": {"value": "CANON ELECTRON TUBES"},
+                    "unit_type": {"value": "25D1063"},
+                    "unit_serial_number": {"value": "25D1063"},
+                },
+            },
+            {
+                "file_name": "label_unit_2.jpeg",
+                "fields": {
+                    "unit_brand": {"value": "Shanghai United Imaging Healthcare Co.,Ltd."},
+                    "unit_type": {"value": "uDR 566i-A"},
+                    "unit_serial_number": {"value": "294248"},
+                },
+            },
+        ],
+        "label_tabung": [
+            {
+                "file_name": "label_unit_1.jpeg",
+                "fields": {
+                    "tube_brand": {"value": "CANON ELECTRON TUBES"},
+                    "tube_type": {"value": "E7876"},
+                    "tube_unit_model": {"value": "E7876X"},
+                    "tube_insert_model": {"value": "E7876"},
+                    "tube_serial_number": {"value": "25D1063"},
+                    "tube_housing_serial": {"value": "25D1063"},
+                    "tube_insert_serial": {"value": "25D0610"},
+                },
+            }
+        ],
+    }
+
+    app = consolidate_application(extractions)
+    # Must have EXACTLY 2 equipment units, NEVER a 3rd phantom unit
+    assert len(app.xray_equipment) == 2
+    assert app.xray_equipment[0].unit_serial_number.value == "294248"
+    assert app.xray_equipment[1].unit_serial_number.value == "422867"
+
+    report = generate_cross_check_report(app, extractions, run_id="hermina_2_units_test")
+    assert len(report.xray_equipment) == 2
+    assert len(report.xray_tubes) == 2
+
+    # Unit 1 should match label_unit_2.jpeg
+    eq1_brand_sources = [s.document_name for s in report.xray_equipment[0].fields["unit_brand"].sources]
+    assert "label_unit_2.jpeg" in eq1_brand_sources
+    assert "label_unit_1.jpeg" not in eq1_brand_sources
+
+    # Tube 1 should match label_unit_1.jpeg
+    tb1_serial_sources = [s.document_name for s in report.xray_tubes[0].fields["tube_serial_number"].sources]
+    assert "label_unit_1.jpeg" in tb1_serial_sources
+
+
+
 
 
 

@@ -141,8 +141,9 @@ def build_extraction_prompt(
     doc_type: str,
     text: str,
     target_fields: Optional[List[str]] = None,
+    context: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Build a precise structured extraction prompt in Indonesian for Qwen 2.5."""
+    """Build a precise structured extraction prompt in Indonesian for Qwen 2.5 with ground truth guidance."""
     fields_to_extract = target_fields or DOCUMENT_FIELDS.get(doc_type, [])
     # Filter out complex multi-entity arrays handled natively
     filtered_fields = [
@@ -156,13 +157,44 @@ def build_extraction_prompt(
 
     instructions_str = "\n".join(field_instructions)
 
+    # Format context guidance from Formulir Permohonan if available
+    ref_lines = []
+    if context:
+        field_labels = {
+            "hospital_name": "Nama Fasilitas / Rumah Sakit",
+            "hospital_address": "Alamat Fasilitas",
+            "unit_brand": "Merk Unit Pesawat",
+            "unit_type": "Tipe / Model Pesawat",
+            "unit_serial_number": "Nomor Seri Unit",
+            "tube_brand": "Merk Tabung",
+            "tube_type": "Tipe / Model Tabung",
+            "tube_serial_number": "Nomor Seri Tabung",
+            "ppr_name": "Nama Petugas Proteksi Radiasi (PPR)",
+            "person_name": "Nama Personel / Dokter",
+        }
+        for k, lbl in field_labels.items():
+            val = context.get(k)
+            if val and str(val).strip() not in ("", "-", "—", "None"):
+                ref_lines.append(f'- {lbl}: "{val}"')
+
+    ref_block = ""
+    if ref_lines:
+        ref_block = (
+            "DATA ACUAN DARI FORMULIR PERMOHONAN:\n"
+            + "\n".join(ref_lines)
+            + "\n\nPANDUAN PENGGUNAAN DATA ACUAN:\n"
+            + "- Gunakan data acuan di atas untuk membantu mengenali entitas yang relevan jika terdapat variasi penulisan, singkatan, atau kesalahan OCR dalam teks dokumen.\n"
+            + "- ATURAN UTAMA: Ekstrak nilai HANYA jika informasi tersebut memang terdapat atau didukung oleh teks dokumen ini.\n"
+            + "- JANGAN menyalin data acuan jika teks dokumen ini secara jelas menyatakan nilai yang berbeda (misalnya dokumen dari rumah sakit lain atau alat lain) atau tidak memuat informasi tersebut sama sekali.\n\n"
+        )
+
     prompt = f"""Anda adalah sistem AI pakar ekstraksi dokumen perizinan ketenaganukliran BAPETEN.
 Tugas Anda adalah mengekstrak field data berikut secara akurat dari teks dokumen berjenis "{doc_type}":
 
 Field yang wajib diekstrak dalam format JSON:
 {instructions_str}
 
-ATURAN PENTING:
+{ref_block}ATURAN PENTING:
 1. Kembalikan HANYA objek JSON murni (valid JSON) tanpa teks pengantar, markdown penjelasan, atau komentar.
 2. Jangan menukar antara nomor seri unit pesawat ("unit_serial_number") dan nomor seri tabung rontgen ("tube_serial_number").
 3. Jika informasi suatu field TIDAK ditemukan dalam teks, berikan nilai string kosong "".
@@ -181,6 +213,7 @@ def extract_with_llm(
     doc_type: str,
     text: str,
     target_fields: Optional[List[str]] = None,
+    context: Optional[Dict[str, Any]] = None,
     timeout: float = LLM_TIMEOUT_SECONDS,
     base_url: str = OLLAMA_BASE_URL,
     model: str = OLLAMA_MODEL,
@@ -192,7 +225,7 @@ def extract_with_llm(
     # Truncate text to avoid excessive prompt evaluation time (first ~7500 chars usually contains headers & specs)
     truncated_text = text[:7500].strip()
 
-    prompt = build_extraction_prompt(doc_type, truncated_text, target_fields)
+    prompt = build_extraction_prompt(doc_type, truncated_text, target_fields, context=context)
     url = f"{base_url.rstrip('/')}/api/generate"
     payload = {
         "model": model,
@@ -266,11 +299,12 @@ def merge_with_llm_fallback(
     parsed_fields: Dict[str, Any],
     pages_text: List[str],
     force_llm: bool = False,
+    context: Optional[Dict[str, Any]] = None,
     timeout: float = LLM_TIMEOUT_SECONDS,
 ) -> Dict[str, Any]:
     """Inspect parsed fields from rule-based parser. If expected fields are missing,
 
-    or if document type is high-variance, query local Ollama LLM as fallback.
+    or if document type is high-variance, query local Ollama LLM as fallback with context guidance.
     """
     import os
     if not USE_LLM_EXTRACTION or ("PYTEST_CURRENT_TEST" in os.environ and not force_llm):
@@ -320,6 +354,7 @@ def merge_with_llm_fallback(
         doc_type=doc_type,
         text=combined_text,
         target_fields=missing_fields,
+        context=context,
         timeout=timeout,
     )
 

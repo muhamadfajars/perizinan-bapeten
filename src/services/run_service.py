@@ -370,10 +370,34 @@ def execute_run(document_inputs, on_progress=None):
 
             # Update running context with extracted hospital/serial info
             f_fields = result.get("fields", {})
-            for key in ["hospital_name", "hospital_address", "unit_serial_number", "unit_brand", "unit_type"]:
+            for key in [
+                "hospital_name",
+                "hospital_address",
+                "unit_serial_number",
+                "unit_brand",
+                "unit_type",
+                "tube_serial_number",
+                "tube_brand",
+                "tube_type",
+                "person_name",
+                "ppr_name",
+            ]:
                 val = f_fields.get(key, {}).get("value")
-                if val and val not in ("-", "—") and key not in running_context:
+                if val and val not in ("-", "—") and (key not in running_context or doc_type == "formulir"):
                     running_context[key] = val
+
+            # Store PPR and personel from formulir personnel_data
+            if doc_type == "formulir" and f_fields.get("personnel_data", {}).get("value"):
+                p_data = f_fields["personnel_data"]["value"]
+                if isinstance(p_data, list):
+                    for p in p_data:
+                        if isinstance(p, dict):
+                            p_name = p.get("name")
+                            p_role = str(p.get("role") or "").lower()
+                            if p_name and ("ppr" in p_role or "petugas" in p_role):
+                                running_context["ppr_name"] = p_name
+                            elif p_name and not running_context.get("person_name"):
+                                running_context["person_name"] = p_name
 
     checks = cross_check(extractions)
     validate_cross_checks(checks)

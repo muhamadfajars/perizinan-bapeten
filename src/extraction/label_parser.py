@@ -48,6 +48,11 @@ def _find_adjacent_box_value(
     lx = float(label_line.get("x", 0))
     ly = float(label_line.get("y", 0))
 
+    # Check horizontally to the left: 0 < lx - x < 250, abs(y - ly) < 40
+    candidates_left = [
+        l for l in all_lines
+        if 0 < lx - float(l.get("x", 0)) < 250 and abs(float(l.get("y", 0)) - ly) < 40
+    ]
     # Check horizontally to the right: x > lx + 15, abs(y - ly) < 70
     candidates_right = [
         l for l in all_lines
@@ -65,25 +70,34 @@ def _find_adjacent_box_value(
     )
 
     valid_candidates = []
-    # Prioritize horizontal candidates (same row)
-    for c in candidates_right:
-        txt = str(c.get("text", "")).strip()
+    # Check horizontal candidates left and right
+    for c in candidates_left + candidates_right:
+        raw_txt = str(c.get("text", "")).strip()
+        txt = re.sub(r"^\((?:21|S|SN)\)\s*", "", raw_txt).strip()
         if not txt or txt.upper() in DISALLOWED_LABEL_VALUES or header_filter.match(txt):
             continue
-        if is_serial and not re.match(r"^[A-Za-z0-9\-]+$", txt):
-            continue
+        if is_serial:
+            # Filter dates or standard 4-digit notified bodies like 0123
+            if re.match(r"^\d{4}[-/]\d{2}[-/]\d{2}$", txt) or txt in ("0123", "0197", "0459", "0086"):
+                continue
+            if not re.match(r"^[A-Za-z0-9\-]+$", txt):
+                continue
         dy = float(c.get("y", 0)) - ly
         dx = float(c.get("x", 0)) - lx
-        dist = dx ** 2 + (dy * 2.5) ** 2
+        dist = abs(dx) ** 2 + (dy * 2.5) ** 2
         valid_candidates.append((dist, txt, c))
 
     if not valid_candidates:
         for c in candidates_below:
-            txt = str(c.get("text", "")).strip()
+            raw_txt = str(c.get("text", "")).strip()
+            txt = re.sub(r"^\((?:21|S|SN)\)\s*", "", raw_txt).strip()
             if not txt or txt.upper() in DISALLOWED_LABEL_VALUES or header_filter.match(txt):
                 continue
-            if is_serial and not re.match(r"^[A-Za-z0-9\-]+$", txt):
-                continue
+            if is_serial:
+                if re.match(r"^\d{4}[-/]\d{2}[-/]\d{2}$", txt) or txt in ("0123", "0197", "0459", "0086"):
+                    continue
+                if not re.match(r"^[A-Za-z0-9\-]+$", txt):
+                    continue
             dist = (float(c.get("x", 0)) - lx) ** 2 + (float(c.get("y", 0)) - ly) ** 2
             valid_candidates.append((dist, txt, c))
 
@@ -189,12 +203,18 @@ def parse_label_unit(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     brand, brand_line = extract_brand_dynamically(active_lines)
 
-    # 1. Serial Number: prioritize dedicated S/N or SN label with adjacent box support
+    # 1. Serial Number: prioritize dedicated GS1 UDI (21), S/N or SN label with adjacent box support
     serial, serial_line = "", None
     for line in sort_by_y(active_lines):
         text = str(line.get("text", "")).strip()
         if re.search(r"\b(?:管芯|INSERT|TUBE)\b", text, re.I):
             continue
+        m_gs1 = re.search(r"\(21\)\s*([A-Za-z0-9\-]+)", text)
+        if m_gs1:
+            val = m_gs1.group(1).strip()
+            if val and val.upper() not in DISALLOWED_LABEL_VALUES:
+                serial, serial_line = val, line
+                break
         m_s = re.search(r"^(?:S\s*/\s*N|SN|SER(?:IAL)?(?:\s*(?:NO|NUMBER))?\.?)\s*[:\-]?\s*(.*)$", text, re.IGNORECASE)
         if m_s:
             val = m_s.group(1).strip(" :;-\t")
@@ -375,8 +395,18 @@ def parse_label_tube(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
         m1_val, m1_line = (models[0][1], models[0][2]) if models else ("", None)
         m2_val, m2_line = (models[1][1], models[1][2]) if len(models) > 1 else ("", None)
 
+    h_s_val, h_s_line = ("", None)
+    ins_s_val, ins_s_line = ("", None)
+    if generic_serials:
+        h_s_val, h_s_line = generic_serials[0][0], generic_serials[0][1]
     if insert_serials:
-        s_val, s_line = insert_serials[0][0], insert_serials[0][1]
+        ins_s_val, ins_s_line = insert_serials[0][0], insert_serials[0][1]
+
+    # For overall tube_serial_number, prefer housing serial if present (standard in BAPETEN permohonan), else insert serial
+    if h_s_val:
+        s_val, s_line = h_s_val, h_s_line
+    elif ins_s_val:
+        s_val, s_line = ins_s_val, ins_s_line
     elif serials:
         s_val, s_line = serials[-1][1], serials[-1][2]
     else:
@@ -415,6 +445,18 @@ def parse_label_tube(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
             "method": "ocr",
             "raw_text": s_line.get("text") if s_line else "",
             "bbox": _extract_bbox(s_line),
+        },
+        "tube_housing_serial": {
+            "value": h_s_val,
+            "method": "ocr",
+            "raw_text": h_s_line.get("text") if h_s_line else "",
+            "bbox": _extract_bbox(h_s_line),
+        },
+        "tube_insert_serial": {
+            "value": ins_s_val,
+            "method": "ocr",
+            "raw_text": ins_s_line.get("text") if ins_s_line else "",
+            "bbox": _extract_bbox(ins_s_line),
         },
         "tube_brand": {
             "value": brand,
